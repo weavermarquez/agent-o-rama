@@ -1319,10 +1319,20 @@
                        j (store/pstate-select :b p :a)]
                    (aor/emit! agent-node "end")
                  )))
-              (aor/node "end"
-                        nil
-                        (fn [agent-node]
-                          (aor/result! agent-node "done")))
+              (aor/node
+               "end"
+               nil
+               (fn [agent-node]
+                 (let [v (volatile! 100)]
+                   (doseq [t [:store-read :store-write :db-read :db-write
+                              :model-call :agent-invoke :other]]
+                     (aor/record-nested-op! agent-node
+                                            t
+                                            (vswap! v inc)
+                                            (vswap! v inc)
+                                            {"a" (vswap! v inc)})
+                   ))
+                 (aor/result! agent-node "done")))
             )
            ))
          (rtest/launch-module! ipc module {:tasks 4 :threads 2})
@@ -1363,25 +1373,30 @@
              :nested-ops
              [{:start-time-millis 0
                :finish-time-millis 1
+               :type :store-read
                :info
-               {"type" "store-query" "op" "get" "params" [:b] "result" []}}
+               {"name" "$$kv" "op" "get" "params" [:b] "result" []}}
               {:start-time-millis 1
                :finish-time-millis 3
+               :type :store-read
                :info
-               {"type" "store-query" "op" "get" "params" [:b] "result" nil}}
+               {"name" "$$kv" "op" "get" "params" [:b] "result" nil}}
               {:start-time-millis 3
                :finish-time-millis 6
+               :type :store-read
                :info
-               {"type"   "store-query"
+               {"name"   "$$kv"
                 "op"     "contains?"
                 "params" [:a]
                 "result" false}}
               {:start-time-millis 6
                :finish-time-millis 10
-               :info {"type" "store-write" "op" "put" "params" [:a 1]}}
+               :type :store-write
+               :info {"name" "$$kv" "op" "put" "params" [:a 1]}}
               {:start-time-millis 10
                :finish-time-millis 15
-               :info {"type" "store-write" "op" "update" "params" [:d]}}]
+               :type :store-write
+               :info {"name" "$$kv" "op" "update" "params" [:d]}}]
              :result            nil
              :agent-id          ?agent-id
              :input             []
@@ -1399,35 +1414,40 @@
              :nested-ops
              [{:start-time-millis 15
                :finish-time-millis 21
+               :type :store-read
                :info
-               {"type"   "store-query"
+               {"name"   "$$doc"
                 "op"     "get-document-field"
                 "params" [:m :a {:default nil}]
                 "result" nil}}
               {:start-time-millis 21
                :finish-time-millis 28
+               :type :store-read
                :info
-               {"type"   "store-query"
+               {"name"   "$$doc"
                 "op"     "get-document-field"
                 "params" [:m :b {:default []}]
                 "result" []}}
               {:start-time-millis 28
                :finish-time-millis 36
+               :type :store-read
                :info
-               {"type"   "store-query"
+               {"name"   "$$doc"
                 "op"     "contains-document-field?"
                 "params" [:m :a]
                 "result" false}}
               {:start-time-millis 36
                :finish-time-millis 45
+               :type :store-write
                :info
-               {"type"   "store-write"
+               {"name"   "$$doc"
                 "op"     "put-document-field"
                 "params" [:m :a 1]}}
               {:start-time-millis 45
                :finish-time-millis 55
+               :type :store-write
                :info
-               {"type"   "store-write"
+               {"name"   "$$doc"
                 "op"     "update-document-field"
                 "params" [:m :a]}}]
              :result            nil
@@ -1447,37 +1467,43 @@
              :nested-ops
              [{:start-time-millis 55
                :finish-time-millis 66
+               :type :store-write
                :info
-               {"type" "store-write" "op" "pstate-transform" "params" [:a]}}
+               {"name" "$$p" "op" "pstate-transform" "params" [:a]}}
               {:start-time-millis 66
                :finish-time-millis 78
+               :type :store-write
                :info
-               {"type" "store-write" "op" "pstate-transform" "params" [:a]}}
+               {"name" "$$p" "op" "pstate-transform" "params" [:a]}}
               {:start-time-millis 78
                :finish-time-millis 91
+               :type :store-read
                :info
-               {"type"   "store-query"
+               {"name"   "$$p"
                 "op"     "pstate-select-one"
                 "params" []
                 "result" 1}}
               {:start-time-millis 91
                :finish-time-millis 105
+               :type :store-read
                :info
-               {"type"   "store-query"
+               {"name"   "$$p"
                 "op"     "pstate-select"
                 "params" []
                 "result" [1]}}
               {:start-time-millis 105
                :finish-time-millis 120
+               :type :store-read
                :info
-               {"type"   "store-query"
+               {"name"   "$$p"
                 "op"     "pstate-select-one"
                 "params" [{:pkey :a}]
                 "result" 2}}
               {:start-time-millis 120
                :finish-time-millis 136
+               :type :store-read
                :info
-               {"type"   "store-query"
+               {"name"   "$$p"
                 "op"     "pstate-select"
                 "params" [{:pkey :a}]
                 "result" [2]}}]
@@ -1492,13 +1518,48 @@
             {:agg-invoke-id     nil
              :emits             []
              :node              "end"
-             :nested-ops        []
              :result            {:val "done" :failure? false}
              :agent-id          ?agent-id
              :input             []
              :agent-task-id     ?agent-task-id
              :start-time-millis 136
              :finish-time-millis 136
+             :nested-ops
+             [{:start-time-millis 101
+               :finish-time-millis 102
+               :type :store-read
+               :info
+               {"a" 103}}
+              {:start-time-millis 104
+               :finish-time-millis 105
+               :type :store-write
+               :info
+               {"a" 106}}
+              {:start-time-millis 107
+               :finish-time-millis 108
+               :type :db-read
+               :info
+               {"a" 109}}
+              {:start-time-millis 110
+               :finish-time-millis 111
+               :type :db-write
+               :info
+               {"a" 112}}
+              {:start-time-millis 113
+               :finish-time-millis 114
+               :type :model-call
+               :info
+               {"a" 115}}
+              {:start-time-millis 116
+               :finish-time-millis 117
+               :type :agent-invoke
+               :info
+               {"a" 118}}
+              {:start-time-millis 119
+               :finish-time-millis 120
+               :type :other
+               :info
+               {"a" 121}}]
             }
            }
            (m/guard
@@ -1506,91 +1567,92 @@
                  (= ?agent-task-id agent-task-id)))))
         )))))
 
+(aor/defagentmodule
+ LoopedModule
+ [topology]
+ (->
+   topology
+   (aor/new-agent "foo")
+   (aor/node
+    "start"
+    ["node1" "AS1"]
+    (fn [agent-node arg res]
+      (if (= arg 2)
+        (aor/emit! agent-node "AS1" (inc arg) (conj res "start"))
+        (aor/emit! agent-node "node1" (inc arg) (conj res "start")))))
+   (aor/node
+    "node1"
+    "start"
+    (fn [agent-node arg res]
+      (aor/emit! agent-node "start" arg (conj res "node1"))))
+   (aor/agg-start-node
+    "AS1"
+    "AS1-n1"
+    (fn [agent-node arg res]
+      (aor/emit! agent-node "AS1-n1" 0)
+      {:arg arg :res res}))
+   (aor/node
+    "AS1-n1"
+    ["AS1-n2" "AS2"]
+    (fn [agent-node n]
+      (when (< n 2)
+        (aor/emit! agent-node "AS1-n2" (inc n)))
+      (aor/emit! agent-node "AS2" 0)
+    ))
+   (aor/node
+    "AS1-n2"
+    "AS1-n3"
+    (fn [agent-node n]
+      (aor/emit! agent-node "AS1-n3" n)))
+   (aor/node
+    "AS1-n3"
+    "AS1-n1"
+    (fn [agent-node n]
+      (aor/emit! agent-node "AS1-n1" n)))
+   (aor/agg-start-node
+    "AS2"
+    "AS2-n1"
+    (fn [agent-node n]
+      (aor/emit! agent-node "AS2-n1" n)
+      {}))
+   (aor/node
+    "AS2-n1"
+    ["AS2-n2" "AS2-agg"]
+    (fn [agent-node n]
+      (aor/emit! agent-node "AS2-agg" 1)
+      (when (< n 2)
+        (aor/emit! agent-node "AS2-n2" (inc n)))
+    ))
+   (aor/node
+    "AS2-n2"
+    "AS2-n1"
+    (fn [agent-node n]
+      (aor/emit! agent-node "AS2-n1" n)
+    ))
+   (aor/agg-node
+    "AS2-agg"
+    ["AS1-agg" "AS2"]
+    aggs/+sum
+    (fn [agent-node agg node-start-res]
+      ;; will loop once
+      (when (= agg 3)
+        (aor/emit! agent-node "AS2" 1))
+      (aor/emit! agent-node "AS1-agg" agg)
+    ))
+   (aor/agg-node
+    "AS1-agg"
+    nil
+    aggs/+sum
+    (fn [agent-node agg {:keys [arg res]}]
+      (aor/result! agent-node (conj res agg))
+    ))
+ ))
+
 (deftest looped-test
   (with-open [ipc (rtest/create-ipc)]
     (letlocals
-     (bind module
-       (aor/agentmodule
-        [topology]
-        (->
-          topology
-          (aor/new-agent "foo")
-          (aor/node
-           "start"
-           ["node1" "AS1"]
-           (fn [agent-node arg res]
-             (if (= arg 2)
-               (aor/emit! agent-node "AS1" (inc arg) (conj res "start"))
-               (aor/emit! agent-node "node1" (inc arg) (conj res "start")))))
-          (aor/node
-           "node1"
-           "start"
-           (fn [agent-node arg res]
-             (aor/emit! agent-node "start" arg (conj res "node1"))))
-          (aor/agg-start-node
-           "AS1"
-           "AS1-n1"
-           (fn [agent-node arg res]
-             (aor/emit! agent-node "AS1-n1" 0)
-             {:arg arg :res res}))
-          (aor/node
-           "AS1-n1"
-           ["AS1-n2" "AS2"]
-           (fn [agent-node n]
-             (when (< n 2)
-               (aor/emit! agent-node "AS1-n2" (inc n)))
-             (aor/emit! agent-node "AS2" 0)
-           ))
-          (aor/node
-           "AS1-n2"
-           "AS1-n3"
-           (fn [agent-node n]
-             (aor/emit! agent-node "AS1-n3" n)))
-          (aor/node
-           "AS1-n3"
-           "AS1-n1"
-           (fn [agent-node n]
-             (aor/emit! agent-node "AS1-n1" n)))
-          (aor/agg-start-node
-           "AS2"
-           "AS2-n1"
-           (fn [agent-node n]
-             (aor/emit! agent-node "AS2-n1" n)
-             {}))
-          (aor/node
-           "AS2-n1"
-           ["AS2-n2" "AS2-agg"]
-           (fn [agent-node n]
-             (aor/emit! agent-node "AS2-agg" 1)
-             (when (< n 2)
-               (aor/emit! agent-node "AS2-n2" (inc n)))
-           ))
-          (aor/node
-           "AS2-n2"
-           "AS2-n1"
-           (fn [agent-node n]
-             (aor/emit! agent-node "AS2-n1" n)
-           ))
-          (aor/agg-node
-           "AS2-agg"
-           ["AS1-agg" "AS2"]
-           aggs/+sum
-           (fn [agent-node agg node-start-res]
-             ;; will loop once
-             (when (= agg 3)
-               (aor/emit! agent-node "AS2" 1))
-             (aor/emit! agent-node "AS1-agg" agg)
-           ))
-          (aor/agg-node
-           "AS1-agg"
-           nil
-           aggs/+sum
-           (fn [agent-node agg {:keys [arg res]}]
-             (aor/result! agent-node (conj res agg))
-           ))
-        )))
-     (rtest/launch-module! ipc module {:tasks 4 :threads 2})
-     (bind module-name (get-module-name module))
+     (rtest/launch-module! ipc LoopedModule {:tasks 4 :threads 2})
+     (bind module-name (get-module-name LoopedModule))
      (bind depot
        (foreign-depot ipc
                       module-name
@@ -1820,70 +1882,68 @@
                                  [[agent-task-id root]]
                                  10000))
          ;; because of early return, subsequent recordings of
-         ;; :invoked-agg-invoke-id
-         ;; are async
+         ;; :invoked-agg-invoke-id are async
          (is
-          (condition-attained?
-           (trace-matches?
-            (:invokes-map res)
-            {!id1
-             {:started-agg?  true
-              :agg-invoke-id !id2
-              :agent-id      ?agent-id
-              :emits
-              [{:invoke-id      !id3
-                :target-task-id ?agent-task-id
-                :node-name      "agg"
-                :args           [1]}
-               {:invoke-id      !id4
-                :target-task-id ?agent-task-id
-                :node-name      "agg"
-                :args           [3]}
-               {:invoke-id      !id5
-                :target-task-id ?agent-task-id
-                :node-name      "agg"
-                :args           [7]}
-               {:invoke-id      !id6
-                :target-task-id ?agent-task-id
-                :node-name      "agg"
-                :args           [2]}
-               {:invoke-id      !id7
-                :target-task-id ?agent-task-id
-                :node-name      "agg"
-                :args           [100]}]
-              :agent-task-id ?agent-task-id
-              :node          "start"
-              :result        nil
-              :nested-ops    []
-              :input         []}
-             !id3 {:invoked-agg-invoke-id !id2}
-             !id4 {:invoked-agg-invoke-id !id2}
-             !id5 {:invoked-agg-invoke-id !id2}
-             !id6 {:invoked-agg-invoke-id !id2}
-             !id7 {:invoked-agg-invoke-id !id2}
-             !id2
-             {:agg-invoke-id   nil
-              :agg-input-count 3
-              :agent-id        0
-              :agg-start-res   nil
-              :emits           []
-              :agent-task-id   ?agent-task-id
-              :node            "agg"
-              :agg-inputs-first-10
-              [{:invoke-id !id3 :args [1]}
-               {:invoke-id !id4 :args [3]}
-               {:invoke-id !id5 :args [7]}]
-              :agg-ack-val     !ack-val
-              :result          {:val 11 :failure? false}
-              :agg-finished?   true
-              :nested-ops      []
-              :agg-state       11
-              :input           [11 nil]
-              :agg-start-invoke-id !id1}}
-            (m/guard
-             (and (= ?agent-id agent-id)
-                  (= ?agent-task-id agent-task-id)))
-           )))
+          (trace-matches?
+           (:invokes-map res)
+           {!id1
+            {:started-agg?  true
+             :agg-invoke-id !id2
+             :agent-id      ?agent-id
+             :emits
+             [{:invoke-id      !id3
+               :target-task-id ?agent-task-id
+               :node-name      "agg"
+               :args           [1]}
+              {:invoke-id      !id4
+               :target-task-id ?agent-task-id
+               :node-name      "agg"
+               :args           [3]}
+              {:invoke-id      !id5
+               :target-task-id ?agent-task-id
+               :node-name      "agg"
+               :args           [7]}
+              {:invoke-id      !id6
+               :target-task-id ?agent-task-id
+               :node-name      "agg"
+               :args           [2]}
+              {:invoke-id      !id7
+               :target-task-id ?agent-task-id
+               :node-name      "agg"
+               :args           [100]}]
+             :agent-task-id ?agent-task-id
+             :node          "start"
+             :result        nil
+             :nested-ops    []
+             :input         []}
+            !id3 {:invoked-agg-invoke-id !id2}
+            !id4 {:invoked-agg-invoke-id !id2}
+            !id5 {:invoked-agg-invoke-id !id2}
+            !id6 {:invoked-agg-invoke-id !id2}
+            !id7 {:invoked-agg-invoke-id !id2}
+            !id2
+            {:agg-invoke-id   nil
+             :agg-input-count 3
+             :agent-id        0
+             :agg-start-res   nil
+             :emits           []
+             :agent-task-id   ?agent-task-id
+             :node            "agg"
+             :agg-inputs-first-10
+             [{:invoke-id !id3 :args [1]}
+              {:invoke-id !id4 :args [3]}
+              {:invoke-id !id5 :args [7]}]
+             :agg-ack-val     !ack-val
+             :result          {:val 11 :failure? false}
+             :agg-finished?   true
+             :nested-ops      []
+             :agg-state       11
+             :input           [11 nil]
+             :agg-start-invoke-id !id1}}
+           (m/guard
+            (and (= ?agent-id agent-id)
+                 (= ?agent-task-id agent-task-id)))
+          ))
 
          (reset! completions-atom 0)
          (bind agent-manager (aor/agent-manager ipc module-name))

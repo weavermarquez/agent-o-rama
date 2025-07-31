@@ -13,8 +13,11 @@
    [com.rpl.agent-o-rama.impl.types :as aor-types]
    [com.rpl.rama.ops :as ops])
   (:import
+   [com.rpl.agentorama
+    AgentObjectOptions$Impl]
    [com.rpl.agentorama.impl
     RamaClientsTaskGlobal
+    AgentDeclaredObjectsTaskGlobal
     AgentNodeExecutorTaskGlobal]
    [com.rpl.agent_o_rama.impl.types
     AggAckOp
@@ -22,6 +25,7 @@
 
 ;; for agent-o-rama namespace
 (defn hook:agent-result-proxy [proxy])
+(defn hook:building-plain-agent-object [name o])
 
 (defn- define-agent!
   [agent-name setup topologies stream-topology mb-topology agent-graph]
@@ -162,7 +166,8 @@
     )))
 
 (defn define-agents!
-  [setup topologies stream-topology mb-topology agent-graphs store-info]
+  [setup topologies stream-topology mb-topology agent-graphs store-info
+   declared-objects]
   (declare-object* setup
                    (symbol (po/agents-store-info-name))
                    (aor-types/->valid-StoreInfo store-info {}))
@@ -176,6 +181,10 @@
   (declare-object* setup
                    (symbol (po/agent-node-executor-name))
                    (AgentNodeExecutorTaskGlobal.))
+
+  (declare-object* setup
+                   (symbol (po/agent-declared-objects-name))
+                   (AgentDeclaredObjectsTaskGlobal. declared-objects))
 
   (let [pstate-write-depot-sym (symbol (po/agent-pstate-write-depot-name))]
     (declare-depot* setup pstate-write-depot-sym (hash-by :key))
@@ -211,3 +220,12 @@
                    stream-topology
                    mb-topology
                    agent-graph)))
+
+(defn convert-agent-object-options
+  [^AgentObjectOptions$Impl options]
+  (when options
+    (setval [MAP-VALS nil?]
+            NONE
+            {:thread-safe?        (.threadSafe options)
+             :auto-tracing?       (.autoTracing options)
+             :worker-object-limit (.workerObjectLimit options)})))
