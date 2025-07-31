@@ -19,6 +19,7 @@
    [com.rpl.rama.aggs :as aggs]
    [com.rpl.rama.ops :as ops]
    [com.rpl.rama.test :as rtest]
+   [com.rpl.test-common :as tc]
    [loom.attr :as lattr]
    [loom.graph :as lgraph]
    [meander.epsilon :as m])
@@ -776,6 +777,10 @@
            (foreign-pstate ipc
                            module-name
                            (po/graph-history-task-global-name "foo")))
+         (bind current-graph-query
+           (foreign-query ipc
+                          module-name
+                          (queries/agent-get-current-graph-name "foo")))
 
          (dotimes [_ 10]
            (let [{[agent-task-id agent-id] "_agents-topology"}
@@ -806,6 +811,7 @@
             "start"
             (:uuid hgraph)))
          (is (= hgraph graph-history1))
+         (is (= graph-history1 (foreign-invoke-query current-graph-query)))
 
          (bind module2
            (aor/agentmodule {:module-name "foo-module"}
@@ -819,6 +825,15 @@
                             )))
 
          (rtest/update-module! ipc module2)
+
+
+         (bind graph-history2*
+           (aor-types/->HistoricalAgentGraphInfo
+            {"start" (aor-types/->HistoricalAgentNodeInfo :node #{} nil)}
+            "start"
+            nil))
+         (is (= graph-history2*
+                (assoc (foreign-invoke-query current-graph-query) :uuid nil)))
 
          (reset! task-counts-atom {})
          (dotimes [_ 10]
@@ -847,6 +862,7 @@
             {"start" (aor-types/->HistoricalAgentNodeInfo :node #{} nil)}
             "start"
             (:uuid hgraph2)))
+         (is (= graph-history2 (foreign-invoke-query current-graph-query)))
          (is (= hgraph1 graph-history1))
          (is (= hgraph2 graph-history2))
         )))))
@@ -2555,6 +2571,7 @@
               (swap! res-atom conj
                 [all-chunks new-chunks reset-invoke-ids complete?])
             )))
+         (is (every? #(= 0 %) (vals (aor/agent-stream-reset-info as))))
          (is (= 14 @closes-atom))
          (is (= 1 (count @res-atom)))
          (bind res (first @res-atom))
@@ -2633,6 +2650,127 @@
        (is (every? #(= % [false false]) (butlast metas)))
        (bind as (aor/agent-stream foo inv "node1"))
        (is (= @as [1 2 3]))
+       (is (= 0 (aor/agent-stream-reset-info as)))
+      ))))
+
+(def NODE1)
+
+(deftest agent-stream-specific-test
+  (with-redefs [SEM   (h/mk-semaphore 0)
+                SEM2  (h/mk-semaphore 0)
+                NODE1 (atom 0)]
+    (with-open [ipc (rtest/create-ipc)]
+      (letlocals
+       (bind module
+         (aor/agentmodule
+          [topology]
+          (->
+            topology
+            (aor/new-agent "foo")
+            (aor/node
+             "start"
+             "node1"
+             (fn [agent-node]
+               (aor/emit! agent-node "node1" 1)
+               (aor/emit! agent-node "node1" 2)
+             ))
+            (aor/node
+             "node1"
+             nil
+             (fn [agent-node i]
+               (swap! NODE1 inc)
+               (if (= i 1)
+                 (do
+                   (h/acquire-semaphore SEM 1)
+                   (aor/stream-chunk! agent-node 1)
+                   (aor/stream-chunk! agent-node 2)
+                   (aor/stream-chunk! agent-node 3)
+                   (aor/result! agent-node "done"))
+                 (do
+                   (h/acquire-semaphore SEM2 1)
+                   (aor/stream-chunk! agent-node 10)
+                   (aor/stream-chunk! agent-node 11)
+                   (aor/stream-chunk! agent-node 12)
+                   (aor/stream-chunk! agent-node 13)
+                   (aor/stream-chunk! agent-node 14)
+                   (aor/stream-chunk! agent-node 15))
+               ))))
+         ))
+       (rtest/launch-module! ipc module {:tasks 4 :threads 2})
+       (bind module-name (get-module-name module))
+
+       (bind agent-manager (aor/agent-manager ipc module-name))
+       (bind foo (aor/agent-client agent-manager "foo"))
+       (bind root-pstate
+         (foreign-pstate ipc
+                         module-name
+                         (po/agent-root-task-global-name "foo")))
+       (bind traces-query
+         (foreign-query ipc
+                        module-name
+                        (queries/tracing-query-name "foo")))
+
+       (bind inv (aor/agent-initiate foo))
+       (bind [agent-task-id agent-id] (tc/extract-invoke inv))
+       (is (condition-attained? (= 2 @NODE1)))
+       (bind root
+         (foreign-select-one [(keypath agent-id) :root-invoke-id]
+                             root-pstate
+                             {:pkey agent-task-id}))
+
+       (bind trace
+         (foreign-invoke-query traces-query
+                               agent-task-id
+                               [[agent-task-id root]]
+                               10000))
+       (bind find-invoke-id
+         (fn [input]
+           (select-any [:invokes-map
+                        ALL
+                        (selected? LAST :input (pred= input))
+                        FIRST]
+                       trace)))
+
+       (bind node-inv1 (find-invoke-id [1]))
+       (bind node-inv2 (find-invoke-id [2]))
+
+       (h/release-semaphore SEM)
+       (h/release-semaphore SEM2)
+
+
+       (bind res-atom (atom []))
+       (bind as
+         (aor/agent-stream-specific
+          foo
+          inv
+          "node1"
+          node-inv2
+          (fn [all-chunks new-chunks reset? complete?]
+            (swap! res-atom conj
+              [all-chunks new-chunks reset? complete?])
+          )))
+       (is (condition-attained? (-> @res-atom
+                                    last
+                                    last)))
+       (is (= @as [10 11 12 13 14 15]))
+       (is
+        (matching-ascending-seq? (mapv first @res-atom) [10 11 12 13 14 15] <=))
+       (doseq [[_ _ reset? complete?] (butlast @res-atom)]
+         (is (not reset?))
+         (is (not complete?)))
+       (bind [_ _ reset? complete?] (last @res-atom))
+       (is (= [false true] [reset? complete?]))
+       (is (= 0 (aor/agent-stream-reset-info as)))
+
+       (bind as
+         (aor/agent-stream-specific
+          foo
+          inv
+          "node1"
+          node-inv1))
+       (is (condition-attained? (= @as [1 2 3])))
+
+       (is (= 0 (aor/agent-stream-reset-info as)))
       ))))
 
 (deftest stream-close-test

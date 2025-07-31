@@ -358,8 +358,12 @@
                                    cluster
                                    module-name
                                    (queries/tracing-query-name
+                                    agentName))
+             current-graph-query  (foreign-query
+                                   cluster
+                                   module-name
+                                   (queries/agent-get-current-graph-name
                                     agentName))]
-
          (reify
           AgentClient
           (invoke [this args]
@@ -466,6 +470,23 @@
                             new-chunks
                             reset?
                             complete?)))))
+          (streamSpecific [this agent-invoke node node-invoke-id]
+            (.streamSpecific this agent-invoke node node-invoke-id nil))
+          (streamSpecific [this agent-invoke node node-invoke-id
+                           stream-callback]
+            (aor-types/stream-specific-internal
+             this
+             agent-invoke
+             node
+             node-invoke-id
+             (when stream-callback
+               (fn [all-chunks new-chunks reset? complete?]
+                 (.onUpdate ^AgentClient$StreamCallback
+                            stream-callback
+                            all-chunks
+                            new-chunks
+                            reset?
+                            complete?)))))
 
 
           (streamAll [this agent-invoke node]
@@ -493,6 +514,14 @@
              agent-invoke
              node
              callback-fn))
+          (stream-specific-internal [this agent-invoke node node-invoke-id
+                                     callback-fn]
+            (iclient/agent-stream-specific-impl
+             streaming-pstate
+             agent-invoke
+             node
+             node-invoke-id
+             callback-fn))
           (stream-all-internal [this agent-invoke node callback-fn]
             (iclient/agent-stream-all-impl
              streaming-pstate
@@ -506,7 +535,9 @@
              :root-pstate          root-pstate
              :streaming-pstate     streaming-pstate
              :graph-history-pstate graph-history-pstate
-             :tracing-query        tracing-query})
+             :tracing-query        tracing-query
+             :current-graph-query  current-graph-query
+            })
          ))))))
 
 (defn agent-client
@@ -565,6 +596,18 @@
    (.stream agent-client agent-invoke node))
   (^AgentStream [^AgentClient agent-client agent-invoke node callback-fn]
    (aor-types/stream-internal agent-client agent-invoke node callback-fn)))
+
+(defn agent-stream-specific
+  (^AgentStream
+   [^AgentClient agent-client agent-invoke node node-invoke-id]
+   (.streamSpecific agent-client agent-invoke node node-invoke-id))
+  (^AgentStream
+   [^AgentClient agent-client agent-invoke node node-invoke-id callback-fn]
+   (aor-types/stream-specific-internal agent-client
+                                       agent-invoke
+                                       node
+                                       node-invoke-id
+                                       callback-fn)))
 
 (defn agent-stream-all
   (^AgentStreamByInvoke [^AgentClient agent-client agent-invoke node]
