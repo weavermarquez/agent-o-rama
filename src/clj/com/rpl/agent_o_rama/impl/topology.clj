@@ -15,9 +15,11 @@
    [com.rpl.agentorama
     FinishedAgg]
    [com.rpl.agent_o_rama.impl.types
+    HumanInput
     Node
     NodeAgg
-    NodeAggStart]
+    NodeAggStart
+    NodeHumanInputRequest]
    [com.rpl.agentorama.impl
     AgentNodeExecutorTaskGlobal]))
 
@@ -375,9 +377,10 @@
    (:> *agent-task-id *fork-agent-id *retry-num *op)))
 
 (deframaop intake-node-failure
-  [*agent-name {:keys [*invoke-id *retry-num]}]
+  [*agent-name {:keys [*invoke-id *retry-num *throwable-str]}]
   (<<with-substitutions
-   [$$nodes (po/agent-node-task-global *agent-name)
+   [$$root (po/agent-root-task-global *agent-name)
+    $$nodes (po/agent-node-task-global *agent-name)
     *failure-depot (po/agent-failures-depot-task-global *agent-name)]
    (local-select> (keypath *invoke-id)
                   $$nodes
@@ -387,6 +390,13 @@
                                   *agent-task-id
                                   *agent-id
                                   *retry-num)
+   (|direct *agent-task-id)
+   (local-transform>
+    [(must *agent-id)
+     :exceptions
+     AFTER-ELEM
+     (termval *throwable-str)]
+    $$root)
    (depot-partition-append!
     *failure-depot
     (aor-types/->valid-AgentFailure *agent-task-id
@@ -754,6 +764,38 @@
       [:invokes (keypath *invoke-id) (termval *streaming-index)])]
     $$streaming)
   ))
+
+(defn- complete-human-future!
+  [^AgentNodeExecutorTaskGlobal node-exec invoke-id uuid response]
+  (if-let [cf (.getHumanFuture node-exec invoke-id uuid)]
+    (.complete cf response)))
+
+(deframaop handle-human
+  [*agent-name *data]
+  (<<with-substitutions
+   [$$root (po/agent-root-task-global *agent-name)
+    *node-exec (po/agent-node-executor-task-global)]
+   (<<subsource *data
+    (case> NodeHumanInputRequest :> {:keys [*agent-id]})
+     (local-transform> [(must *agent-id)
+                        :human-requests
+                        NONE-ELEM
+                        (termval *data)]
+                       $$root)
+
+    (case> HumanInput
+           :> {:keys [*request *response]})
+     (identity *request :> {:keys [*agent-id *node-task-id *invoke-id *uuid]})
+     (complete-human-future! *node-exec *invoke-id *uuid *response)
+     (get *request :agent-task-id :> *agent-task-id)
+     (|direct *agent-task-id)
+     (local-transform> [(must *agent-id)
+                        :human-requests
+                        (set-elem *request)
+                        NONE>]
+                       $$root)
+     (local-select> (keypath *agent-id) $$root :> *tmp)
+   )))
 
 (deframaop handle-config
   [*agent-name {:keys [*key *val]}]

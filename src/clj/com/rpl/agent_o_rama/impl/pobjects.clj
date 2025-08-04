@@ -12,6 +12,7 @@
     AggInput
     ForkContext
     NestedOpInfo
+    NodeHumanInputRequest
     HistoricalAgentGraphInfo
     Node
     NodeAgg
@@ -41,6 +42,10 @@
 (defn agent-streaming-depot-name
   [name]
   (RamaClientsTaskGlobal/agentStreamingDepotName name))
+
+(defn agent-human-depot-name
+  [name]
+  (RamaClientsTaskGlobal/agentHumanDepotName name))
 
 (defn agent-config-depot-name
   [name]
@@ -77,11 +82,13 @@
      :invoke-args        [Object]
      :graph-version      Long
      :result             AgentResult
+     :exceptions         [String]
      :ack-val            Long
      :start-time-millis  Long
      :finish-time-millis Long
      :last-progress-time-millis Long
      :retry-num          Long
+     :human-requests     (set-schema NodeHumanInputRequest {:subindex? true})
      :fork-of            (fixed-keys-schema
                           {:parent-agent-id Long
                            :fork-context    ForkContext})

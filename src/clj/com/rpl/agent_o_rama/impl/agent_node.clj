@@ -45,15 +45,16 @@
    [java.util.concurrent
     CompletableFuture]))
 
-(defn next-task-thread-id
-  [task-thread-id-vol ^com.rpl.rama.ModuleInstanceInfo module-instance-info]
-  (when (empty? @task-thread-id-vol)
-    (vreset! task-thread-id-vol
-             (-> (.getTaskThreadIds module-instance-info)
+(defn next-task-id
+  [task-id-vol ^com.rpl.rama.ModuleInstanceInfo module-instance-info]
+  (when (empty? @task-id-vol)
+    (vreset! task-id-vol
+             (-> (.getNumTasks module-instance-info)
+                 range
                  shuffle
                  seq)))
-  (let [ret (long (first @task-thread-id-vol))]
-    (vswap! task-thread-id-vol next)
+  (let [ret (long (first @task-id-vol))]
+    (vswap! task-id-vol next)
     ret))
 
 (defprotocol AgentNodeInternal
@@ -131,6 +132,7 @@
    :db-write     NestedOpType/DB_WRITE
    :model-call   NestedOpType/MODEL_CALL
    :agent-invoke NestedOpType/AGENT_INVOKE
+   :human-input  NestedOpType/HUMAN_INPUT
    :other        NestedOpType/OTHER
   })
 
@@ -156,7 +158,7 @@
         result-vol            (volatile! nil)
         emits-vol             (volatile! [])
         nested-ops-vol        (volatile! [])
-        task-thread-ids-vol   (volatile! nil)
+        task-ids-vol          (volatile! nil)
         emit-count-vol        (volatile! 0)
         valid-output-nodes    (-> agent-graph
                                   :node-map
@@ -169,6 +171,7 @@
         this-module-name      (.getModuleName module-instance-info)
         random-source         (ops/current-random-source)
         streaming-depot       (.getAgentStreamingDepot rama-clients agent-name)
+        human-depot           (.getAgentHumanDepot rama-clients agent-name)
         streaming-recorder    (mk-streaming-recorder agent-task-id
                                                      agent-id
                                                      curr-node
@@ -177,6 +180,10 @@
                                                      streaming-depot)
 
         declared-objects-tg   (po/agent-declared-objects-task-global)
+
+        ^AgentNodeExecutorTaskGlobal node-exec
+        (po/agent-node-executor-task-global)
+
         acquired-objects-atom (atom [])
        ]
     (reify
@@ -201,7 +208,7 @@
                               agent-graph)
              (if (= emit-count 1)
                task-id
-               (next-task-thread-id task-thread-ids-vol module-instance-info))
+               (next-task-id task-ids-vol module-instance-info))
              agent-task-id)
            node
            (vec args)
@@ -259,6 +266,31 @@
                 finish-time-millis
                 (nested-op-type->clj type)
                 info)))
+     (getHumanInput
+       [this prompt]
+       (let [start-time-millis (h/current-time-millis)
+             request (aor-types/->valid-NodeHumanInputRequest
+                      agent-task-id
+                      agent-id
+                      curr-node
+                      task-id
+                      invoke-id
+                      prompt
+                      (h/uuid-str))
+             cf      (CompletableFuture.)
+             _ (.putHumanFuture node-exec invoke-id request cf)
+             _ (foreign-append! human-depot request :append-ack)
+             ret     (.get cf)]
+         (vswap! nested-ops-vol
+                 conj
+                 (aor-types/->NestedOpInfo
+                  start-time-millis
+                  (h/current-time-millis)
+                  :human-input
+                  {"prompt" prompt
+                   "result" ret}))
+         ret
+       ))
      AgentNodeInternal
      (get-streaming-recorder [this] streaming-recorder)
      (release-acquired-objects! [this]
@@ -269,7 +301,6 @@
         :result     @result-vol
         :nested-ops @nested-ops-vol
        }))))
-
 
 (defn submit-virtual-task!
   [invoke-id afn]
@@ -588,7 +619,8 @@
                      (aor-types/->valid-NodeFailure
                       task-id
                       invoke-id
-                      retry-num)
+                      retry-num
+                      (h/throwable->str t))
                      :append-ack)
                     (throw t))
                   (finally
@@ -681,16 +713,25 @@
     (afn)
     (catch Throwable t
       (log-node-error t "Error invoking function" {:info info})
-      ::error)))
+      {::error t})))
 
 (defn hook:appended-agent-failure [agent-task-id agent-id retry-num])
 
 (deframaop invoke-on-task-thread
   [*agent-name *agent-task-id *agent-id *retry-num *afn *info]
   (<<with-substitutions
-   [*failure-depot (po/agent-failures-depot-task-global *agent-name)]
+   [$$root (po/agent-root-task-global *agent-name)
+    *failure-depot (po/agent-failures-depot-task-global *agent-name)]
    (invoke-or-error *afn *info :> *res)
-   (<<if (= *res ::error)
+   (<<if (and> (map? *res) (contains? *res ::error))
+     (h/throwable->str (get *res ::error) :> *s)
+     (|direct *agent-task-id)
+     (local-transform>
+      [(must *agent-id)
+       :exceptions
+       AFTER-ELEM
+       (termval *s)]
+      $$root)
      (depot-partition-append!
       *failure-depot
       (aor-types/->valid-AgentFailure *agent-task-id *agent-id *retry-num)

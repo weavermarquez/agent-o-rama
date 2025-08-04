@@ -7,6 +7,9 @@
    [com.rpl.ramaspecter.defrecord-plus :as drp]
    [rpl.schema.core :as s])
   (:import
+   [com.rpl.agentorama
+    AgentComplete
+    HumanInputRequest]
    [com.rpl.agentorama.impl
     NippyMap]
    [com.rpl.rama.integration
@@ -47,6 +50,11 @@
   [val :- s/Any
    failure? :- Boolean])
 
+(drp/defrecord+ AgentCompleteImpl
+  [result :- s/Any]
+  AgentComplete
+  (getResult [this] val))
+
 (drp/defrecord+ AgentNode
   [node :- (s/cond-pre Node NodeAggStart NodeAgg)
    output-nodes :- #{String}
@@ -83,6 +91,7 @@
            :db-read
            :model-call
            :agent-invoke
+           :human-input
            :other)
    ;; info for models contains token stats, input prompt, output, etc.
    info :- (s/maybe {String s/Any})])
@@ -122,6 +131,7 @@
   [task-id :- Long
    invoke-id :- Long
    retry-num :- Long
+   throwable-str :- String
   ])
 
 (drp/defrecord+ AgentFailure
@@ -164,6 +174,23 @@
   [invoke-id :- Long
    index :- Long
    chunk :- Object])
+
+(drp/defrecord+ NodeHumanInputRequest
+  [agent-task-id :- Long
+   agent-id :- Long
+   node :- String
+   node-task-id :- Long
+   invoke-id :- Long
+   prompt :- String
+   uuid :- String]
+  HumanInputRequest
+  (getNode [this] node)
+  (getNodeInvokeId [this] invoke-id)
+  (getPrompt [this] prompt))
+
+(drp/defrecord+ HumanInput
+  [request :- NodeHumanInputRequest
+   response :- String])
 
 (drp/defrecord+ NodeOp
   [invoke-id :- Long

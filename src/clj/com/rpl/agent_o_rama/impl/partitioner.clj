@@ -29,9 +29,24 @@
   [(vec partitioner+args)
    [filter-valid-retry-num> agent-name agent-task-id agent-id retry-num]])
 
-(defdepotpartitioner agent-streaming-depot-partitioner
+(defdepotpartitioner agent-task-id-depot-partitioner
   [{:keys [agent-task-id]} num-partitions]
   agent-task-id)
+
+(defdepotpartitioner human-depot-partitioner
+  [data num-partitions]
+  (cond
+    (aor-types/NodeHumanInputRequest? data)
+    (:agent-task-id data)
+
+    (aor-types/HumanInput? data)
+    (-> data
+        :request
+        :node-task-id)
+
+    :else
+    (throw (h/ex-info "Unexpected type" {:type (class data)}))
+  ))
 
 (defdepotpartitioner agent-depot-partitioner
   [data num-partitions]

@@ -14,6 +14,8 @@
    [com.rpl.rama.ops :as ops])
   (:import
    [com.rpl.agentorama
+    AgentFailedException
+    AgentInvoke
     AgentObjectOptions$Impl]
    [com.rpl.agentorama.impl
     RamaClientsTaskGlobal
@@ -21,10 +23,11 @@
     AgentNodeExecutorTaskGlobal]
    [com.rpl.agent_o_rama.impl.types
     AggAckOp
-    NodeOp]))
+    NodeOp]
+   [java.util.concurrent
+    CompletableFuture]))
 
 ;; for agent-o-rama namespace
-(defn hook:agent-result-proxy [proxy])
 (defn hook:building-plain-agent-object [name o])
 
 (defn- define-agent!
@@ -32,12 +35,17 @@
   (let [agent-depot-sym           (symbol (po/agent-depot-name agent-name))
         agent-streaming-depot-sym (symbol (po/agent-streaming-depot-name
                                            agent-name))
+        agent-human-depot-sym     (symbol (po/agent-human-depot-name
+                                           agent-name))
         agent-config-depot-sym    (symbol (po/agent-config-depot-name
                                            agent-name))]
     (declare-depot* setup agent-depot-sym apart/agent-depot-partitioner)
     (declare-depot* setup
                     agent-streaming-depot-sym
-                    apart/agent-streaming-depot-partitioner)
+                    apart/agent-task-id-depot-partitioner)
+    (declare-depot* setup
+                    agent-human-depot-sym
+                    apart/human-depot-partitioner)
     (declare-depot* setup
                     agent-config-depot-sym
                     :random
@@ -102,6 +110,7 @@
     (doseq [d [(symbol (po/agent-failures-depot-name agent-name))
                agent-config-depot-sym
                agent-streaming-depot-sym
+               agent-human-depot-sym
                agent-depot-sym]]
       (set-launch-depot-dynamic-option!* setup
                                          d
@@ -130,6 +139,9 @@
 
      (source> agent-streaming-depot-sym {:retry-mode :all-after} :> *data)
       (at/handle-streaming agent-name *data)
+
+     (source> agent-human-depot-sym :> *data)
+      (at/handle-human agent-name *data)
 
       ;; TODO: add case here for GC
       ;; - each iteration delete node and write to PState the next ones to
@@ -229,3 +241,66 @@
             {:thread-safe?        (.threadSafe options)
              :auto-tracing?       (.autoTracing options)
              :worker-object-limit (.workerObjectLimit options)})))
+
+(defn mk-failure-exception
+  [result exceptions]
+  (let [s (-> result
+              :val
+              str)
+        s (if (empty? exceptions)
+            s
+            (str s
+                 " (last failure: "
+                 (-> exceptions
+                     last
+                     h/first-line)
+                 ")"))]
+    (AgentFailedException. s)))
+
+(defn hook:agent-result-proxy [proxy])
+
+(defn client-wait-for-result
+  [root-pstate ^AgentInvoke agent-invoke handle-fn]
+  (let [agent-task-id (.getTaskId agent-invoke)
+        agent-id      (.getAgentInvokeId agent-invoke)
+        ret           (CompletableFuture.)
+        proxy-atom    (atom nil)]
+    (.thenApply
+     (foreign-proxy-async
+      [(keypath agent-id)
+       (submap [:result :exceptions :human-requests])
+       (transformed :human-requests first)
+       (multi-transformed [(map-key :human-requests) (termval :human-request)])]
+      root-pstate
+      {:pkey        agent-task-id
+       :callback-fn
+       (fn [m _ _]
+         (let [done-fn (handle-fn m)]
+           (when (some? done-fn)
+             (when-not (.isDone ret)
+               (done-fn ret))
+             (locking proxy-atom
+               (cond
+                 (nil? @proxy-atom)
+                 (reset! proxy-atom ::close)
+
+                 (keyword? @proxy-atom) nil
+
+                 :else
+                 (do
+                   (close! @proxy-atom)
+                   (reset! proxy-atom ::done)
+                 )))
+           )))
+      })
+     (h/cf-function [proxy-state]
+       (hook:agent-result-proxy proxy-state)
+       (locking proxy-atom
+         (if (= ::close @proxy-atom)
+           (do
+             (close! proxy-state)
+             (reset! proxy-atom ::done))
+           (reset! proxy-atom proxy-state))
+       )))
+    ret
+  ))
