@@ -53,6 +53,10 @@
   [name]
   (str "*_agent-config-depot-" name))
 
+(defn agent-gc-tick-depot-name
+  [name]
+  (str "*_agent-gc-tick-depot-" name))
+
 (defn agent-check-tick-depot-name
   [name]
   (str "*_agent-check-tick-depot-" name))
@@ -60,6 +64,10 @@
 (defn agent-failures-depot-name
   [name]
   (str "*_agent-failures-depot-" name))
+
+(defn agent-gc-valid-invokes-depot-name
+  [name]
+  (str "*_agent-gc-valid-invokes-depot-" name))
 
 (defn agents-clients-name
   []
@@ -77,7 +85,7 @@
   [agent-name]
   (str "$$_agent-root-" agent-name))
 
-(def AGENT-INVOKE-PSTATE-SCHEMA
+(def AGENT-ROOT-PSTATE-SCHEMA
   {Long
    (fixed-keys-schema
     {:root-invoke-id     UUID
@@ -96,6 +104,10 @@
                            :fork-context    ForkContext})
      :forks              (set-schema Long {:subindex? true}) ; agent ids
     })})
+
+(defn agent-root-count-task-global-name
+  [agent-name]
+  (str "$$_agent-root-count-" agent-name))
 
 (defn agent-active-invokes-task-global-name
   [agent-name]
@@ -215,6 +227,10 @@
   [name]
   (this-module-pobject-task-global (agent-failures-depot-name name)))
 
+(defn agent-gc-valid-invokes-depot-task-global
+  [name]
+  (this-module-pobject-task-global (agent-gc-valid-invokes-depot-name name)))
+
 (defn agents-clients-task-global
   []
   (declared-object-task-global (agents-clients-name)))
@@ -230,6 +246,10 @@
 (defn agent-root-task-global
   [name]
   (this-module-pobject-task-global (agent-root-task-global-name name)))
+
+(defn agent-root-count-task-global
+  [name]
+  (this-module-pobject-task-global (agent-root-count-task-global-name name)))
 
 (defn agent-active-invokes-task-global
   [name]

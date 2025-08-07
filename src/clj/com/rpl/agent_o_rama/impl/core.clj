@@ -27,6 +27,9 @@
    [java.util.concurrent
     CompletableFuture]))
 
+(def SUBSTITUTE-TICK-DEPOTS false)
+(def DEFAULT-GC-TICK-MILLIS 10000)
+
 ;; for agent-o-rama namespace
 (defn hook:building-plain-agent-object [name o])
 
@@ -38,6 +41,8 @@
         agent-human-depot-sym     (symbol (po/agent-human-depot-name
                                            agent-name))
         agent-config-depot-sym    (symbol (po/agent-config-depot-name
+                                           agent-name))
+        agent-gc-tick-depot-sym   (symbol (po/agent-gc-tick-depot-name
                                            agent-name))]
     (declare-depot* setup agent-depot-sym apart/agent-depot-partitioner)
     (declare-depot* setup
@@ -58,8 +63,14 @@
     (declare-pstate*
      stream-topology
      (symbol (po/agent-root-task-global-name agent-name))
-     po/AGENT-INVOKE-PSTATE-SCHEMA
+     po/AGENT-ROOT-PSTATE-SCHEMA
      {:key-partitioner apart/task-id-key-partitioner})
+    (declare-pstate*
+     stream-topology
+     (symbol (po/agent-root-count-task-global-name agent-name))
+     Long
+     {:initial-value   0
+      :key-partitioner apart/task-id-key-partitioner})
     (declare-pstate*
      stream-topology
      (symbol (po/agent-active-invokes-task-global-name agent-name))
@@ -67,7 +78,8 @@
     (declare-pstate*
      stream-topology
      (symbol (po/agent-gc-invokes-task-global-name agent-name))
-     po/AGENT-GC-ROOT-INVOKES-PSTATE-SCHEMA)
+     po/AGENT-GC-ROOT-INVOKES-PSTATE-SCHEMA
+     {:key-partitioner apart/task-id-key-partitioner})
     (declare-pstate*
      stream-topology
      (symbol (po/agent-streaming-results-task-global-name agent-name))
@@ -94,20 +106,33 @@
      po/AGENT-CONFIG-PSTATE-SCHEMA
      {:key-partitioner apart/task-id-key-partitioner})
 
-    (if retries/SUBSTITUTE-TICK-DEPOT
-      (declare-depot* setup
-                      (symbol (po/agent-check-tick-depot-name agent-name))
-                      :random
-                      {:global? true})
-      (declare-tick-depot* setup
-                           (symbol (po/agent-check-tick-depot-name agent-name))
-                           retries/DEFAULT-CHECKER-TICK-MILLIS))
+    (if SUBSTITUTE-TICK-DEPOTS
+      (do
+        (declare-depot* setup
+                        (symbol (po/agent-check-tick-depot-name agent-name))
+                        :random
+                        {:global? true})
+        (declare-depot* setup
+                        agent-gc-tick-depot-sym
+                        :random
+                        {:global? true}))
+      (do
+        (declare-tick-depot* setup
+                             (symbol (po/agent-check-tick-depot-name
+                                      agent-name))
+                             retries/DEFAULT-CHECKER-TICK-MILLIS)
+        (declare-tick-depot* setup
+                             agent-gc-tick-depot-sym
+                             DEFAULT-GC-TICK-MILLIS)))
     (declare-depot* setup
                     (symbol (po/agent-failures-depot-name agent-name))
                     :random)
-
+    (declare-depot* setup
+                    (symbol (po/agent-gc-valid-invokes-depot-name agent-name))
+                    :random)
 
     (doseq [d [(symbol (po/agent-failures-depot-name agent-name))
+               (symbol (po/agent-gc-valid-invokes-depot-name agent-name))
                agent-config-depot-sym
                agent-streaming-depot-sym
                agent-human-depot-sym
@@ -143,12 +168,8 @@
      (source> agent-human-depot-sym :> *data)
       (at/handle-human agent-name *data)
 
-      ;; TODO: add case here for GC
-      ;; - each iteration delete node and write to PState the next ones to
-      ;; delete and where – can probably be same PState as one used by retry
-      ;; - ordered IDs is perfect for GC
-      ;;    - especially since they're sequential, so know exactly how many are
-      ;;    in there by looking at min and max
+     (source> agent-gc-tick-depot-sym)
+      (at/handle-gc agent-name)
 
      (source> agent-depot-sym {:retry-mode :none} :> *data)
       (at/intake-agent-depot agent-name

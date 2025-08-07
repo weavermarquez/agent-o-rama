@@ -174,10 +174,14 @@
 (deframaop init-root
   [*agent-name *agent-id *retry-num *args]
   (<<with-substitutions
-   [$$root (po/agent-root-task-global *agent-name)]
+   [$$root (po/agent-root-task-global *agent-name)
+    $$root-count (po/agent-root-count-task-global *agent-name)]
    (fetch-graph-version *agent-name :> *version)
    (random-uuid :> *invoke-id)
    (h/current-time-millis :> *current-time-millis)
+   (local-select> [(keypath *agent-id) (view some?)] $$root :> *exists?)
+   (<<if (not *exists?)
+     (local-transform> (term inc) $$root-count))
    (local-transform>
     [(keypath *agent-id)
      (termval {:root-invoke-id    *invoke-id
@@ -245,7 +249,7 @@
   [*agent-name {:keys [*agent-task-id *agent-id *expected-retry-num]}]
   (<<with-substitutions
    [$$root (po/agent-root-task-global *agent-name)
-    $$gc-invokes (po/agent-gc-invokes-task-global *agent-name)
+    $$gc (po/agent-gc-invokes-task-global *agent-name)
     *agent-graph (po/agent-graph-task-global *agent-name)]
    (hook:received-retry *agent-task-id *agent-id *expected-retry-num)
    (local-select> (keypath *agent-id)
@@ -290,7 +294,7 @@
     (else>)
      (<<if (= :restart *handle-mode)
        (local-transform> [(keypath *root-invoke-id) (termval nil)]
-                         $$gc-invokes)
+                         $$gc)
        (init-root *agent-name *agent-id *retry-num *args :> *root-invoke-id)
       (else>)
        (identity *root-invoke-id :> *root-invoke-id))
@@ -1076,3 +1080,74 @@
                       *agent-id
                       *retry-num
                       *node-op))))
+
+(deframaop handle-gc
+  [*agent-name]
+  (<<with-substitutions
+   [$$root (po/agent-root-task-global *agent-name)
+    $$root-count (po/agent-root-count-task-global *agent-name)
+    $$nodes (po/agent-node-task-global *agent-name)
+    $$gc (po/agent-gc-invokes-task-global *agent-name)
+    *gc-valid-depot (po/agent-gc-valid-invokes-depot-task-global *agent-name)]
+   (anode/read-config *agent-name
+                      aor-types/MAX-TRACES-PER-TASK-CONFIG
+                      :> *max-traces)
+   (|all)
+   (local-select> STAY $$root-count :> *curr-count)
+   (- *curr-count *max-traces :> *delete-count)
+   (<<if (pos? *delete-count)
+     (<<atomic
+       (local-select> (sorted-map-range-from-start *delete-count)
+                      $$root
+                      {:allow-yield? true}
+                      :> *to-delete)
+       (ops/current-task-id :> *agent-task-id)
+       (select>
+         ALL
+         *to-delete
+         {:allow-yield? true}
+         :> [*agent-id {:keys [*root-invoke-id *retry-num *result]}])
+       (filter> (some? *result))
+       (local-transform> [(keypath *agent-id)
+                          (multi-path [:forks NONE>]
+                                      [:human-requests NONE>])]
+                         $$root)
+       (|direct *agent-task-id)
+       ;; rare possibility it ticks again while partitioning and tries to delete
+       ;; same elements concurrently
+       (local-select> [(keypath *agent-id) (view some?)] $$root :> *exists?)
+       (<<if *exists?
+         (<<if (> *retry-num 0)
+           (depot-partition-append! *gc-valid-depot
+                                    [*agent-task-id *agent-id]
+                                    :append-ack))
+         (local-transform> [(keypath *root-invoke-id) (termval nil)] $$gc)
+         (local-transform> [(keypath *agent-id) NONE>] $$root)
+         (local-transform> (term dec) $$root-count))))
+   (local-select> MAP-KEYS $$gc {:allow-yield? true} :> *invoke-id)
+   (local-select> [(keypath *invoke-id)]
+                  $$nodes
+                  :> {:keys [*emits *started-agg? *agg-invoke-id]})
+   (ops/current-task-id :> *start-task-id)
+   (<<ramafn %to-tuple
+     [{:keys [*target-task-id *invoke-id]}]
+     (:> [*target-task-id *invoke-id]))
+   (mapv %to-tuple *emits :> *tuples)
+   (<<if *started-agg?
+     (conj *tuples [*start-task-id *agg-invoke-id] :> *tuples)
+    (else>)
+     (identity *tuples :> *tuples))
+   (loop<- [*tuples (seq *tuples)]
+     (<<if (empty? *tuples)
+       (:>)
+      (else>)
+       (first *tuples :> [*emit-task-id *emit-invoke-id])
+       (|direct *emit-task-id)
+       (local-transform> [(keypath *emit-invoke-id) (termval nil)] $$gc)
+       (continue> (next *tuples))))
+   (|direct *start-task-id)
+   (local-transform> [(keypath *invoke-id) :agg-inputs NONE>] $$nodes)
+   (|direct *start-task-id)
+   (local-transform> [(keypath *invoke-id) NONE>] $$nodes)
+   (local-transform> [(keypath *invoke-id) NONE>] $$gc)
+  ))
