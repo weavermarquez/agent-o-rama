@@ -21,3 +21,12 @@ target/
 scripts/code-format
 .on-save.json
 .zprintrc
+
+# frontend 
+.shadow-cljs/
+node_modules/
+public/
+
+# compiled frontend output
+resource/main.js
+resource/manifest.edn

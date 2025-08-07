@@ -367,6 +367,12 @@
                                    module-name
                                    (queries/tracing-query-name
                                     agentName))
+             invokes-page-query (foreign-query
+                                 cluster
+                                 module-name
+                                 (queries/agent-get-invokes-page-query-name
+                                  agentName))
+
              current-graph-query  (foreign-query
                                    cluster
                                    module-name
@@ -556,6 +562,7 @@
              :streaming-pstate     streaming-pstate
              :graph-history-pstate graph-history-pstate
              :tracing-query        tracing-query
+             :invokes-page-query   invokes-page-query
              :current-graph-query  current-graph-query
             })
          ))))))
@@ -672,3 +679,11 @@
   ^CompletableFuture
   [^AgentClient client request response]
   (.provideHumanInputAsync client request response))
+
+(defn start-ui ^java.io.Closeable [ipc]
+  (let [start-fn (requiring-resolve 'com.rpl.agent-o-rama.impl.ui.core/start-ui)]
+    (start-fn ipc)))
+
+(defn stop-ui []
+  (let [stop-fn (requiring-resolve 'com.rpl.agent-o-rama.impl.ui.core/stop-ui)]
+    (stop-fn)))
