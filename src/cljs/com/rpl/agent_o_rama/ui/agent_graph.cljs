@@ -145,24 +145,26 @@
        "elk.spacing.nodeNode" "80"
        "elk.direction" "DOWN"
        "feedbackEdges" "true"
-       "edgeRouting" "SPLINES"
+       "edgeRouting" "POLYLINE"
        "spacing.edgeEdgeBetweenLayers" "100"
        "crossingMinimization.strategy" "LAYER_SWEEP"
        "nodePlacement.strategy" "BRANDES_KOEPF"})
 
 (defn extract-graph-elements [{:keys [graph]}]
-  "Extract nodes and edges from graph data without layout"
-  (let [nodes (s/select [:node-map
-                         s/MAP-KEYS
-                         (s/view
-                          (fn [k]
-                            {:id k
-                             :type "custom"
-                             :draggable false
-                             :data {:label k :node-id k}
-                             :width 170
-                             :height 40}))]
-                        graph)
+  "Extract nodes, edges, and start node from graph data without layout"
+  (let [start-id (:start-node graph)
+        ;; Build nodes with extra metadata for coloring (node-type and start?)
+        nodes (->> (get graph :node-map)
+                   (map (fn [[k v]]
+                          {:id k
+                           :type "custom"
+                           :draggable false
+                           :data {:label k
+                                  :node-id k
+                                  :node-type (:node-type v)
+                                  :is-start? (= k start-id)}
+                           :width 170
+                           :height 40})))
         
         edges (s/select
                [:node-map
@@ -173,9 +175,10 @@
                 s/ALL]
                graph)]
     {:nodes nodes
-     :edges (for [[frm to] edges] {:id (str frm "-" to) :source frm :target to
-     :markerEnd {:type "arrowclosed" :width 20 :height 20}
-     })}))
+     :edges (for [[frm to] edges]
+              {:id (str frm "-" to) :source frm :target to
+               :markerEnd {:type "arrowclosed" :width 20 :height 20}})
+     :start-id start-id}))
 
 (defn process-elk-edge [edge]
   "Process an ELK edge to extract routing points for React Flow"
@@ -205,7 +208,7 @@
         ;; Set edge type to use our custom rendering
         (assoc :type "elk-edge"))))
 
-(defn get-layouted-elements [nodes edges options]
+(defn get-layouted-elements [nodes edges options start-id]
   "Layout nodes and edges using ELK.js"
   (let [is-horizontal false
         ;; Create a map of original edges by ID for merging later
@@ -215,6 +218,8 @@
                    :children (clj->js 
                              (map (fn [node]
                                     (-> node
+                                         (cond-> (= start-id (:id node))
+                                           (assoc :layoutOptions {"elk.layered.layering.layerConstraint" "FIRST"}))
                                         (assoc :targetPosition (if is-horizontal "left" "top"))
                                         (assoc :sourcePosition (if is-horizontal "right" "bottom"))
                                         (assoc :width 170)
@@ -242,7 +247,7 @@
 
 (defui graph-flow [{:keys [initial-data height selected-node set-selected-node]}]
   (let [;; Extract initial nodes and edges
-        {:keys [nodes edges]} (extract-graph-elements initial-data)
+        {:keys [nodes edges start-id]} (extract-graph-elements initial-data)
         
         ;; Use React Flow's state management hooks
         [flow-nodes set-nodes on-nodes-change] (useNodesState #js [])
@@ -260,7 +265,7 @@
      (fn []
        (when (and nodes edges (not initial-layout-done?))
          (let [opts elk-options]
-           (-> (get-layouted-elements nodes edges opts)
+           (-> (get-layouted-elements nodes edges opts start-id)
                (.then (fn [result]
                         (let [layouted-nodes (clj->js (.-nodes result))
                               layouted-edges (clj->js (.-edges result))]
@@ -282,11 +287,16 @@
                      (clj->js {"custom"
                                (uix.core/as-react
                                 (fn [{:keys [data id]}]
-                                  (let [data (js->clj data :keywordize-keys true)
+                                   (let [data (js->clj data :keywordize-keys true)
                                         label (:label data)
                                         node-id (:node-id data)
+                                        node-type (:node-type data)
                                         selected (= (when selected-node (.-id selected-node)) id)
                                         base-classes (cond
+                                                       (= "agg-start-node" node-type)
+                                                       ["bg-green-500" "text-white" "border-2" "border-green-600"]
+                                                       (= "agg-node" node-type)
+                                                       ["bg-yellow-500" "text-white" "border-2" "border-yellow-600"]
                                                        :else
                                                        ["bg-white" "text-gray-800" "border-2" "border-gray-300"])
                                         selection-classes (if selected

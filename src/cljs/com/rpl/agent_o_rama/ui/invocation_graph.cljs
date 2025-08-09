@@ -2,6 +2,7 @@
   (:require
    [com.rpl.agent-o-rama.ui.common :as common]
    [clojure.string :as str]
+   [clojure.pprint]
    [goog.i18n.DateTimeFormat :as dtf]
    [goog.date.UtcDateTime    :as utc-dt]
    
@@ -20,7 +21,7 @@
         formatter (js/Intl.DateTimeFormat.
                    "en-US"
                    #js {:year          "numeric"
-                        :month         "long"
+                        :month         "short"
                         :day           "numeric"
                         :hour          "2-digit"
                         :minute        "2-digit"
@@ -63,16 +64,23 @@
     (.-body js/document)))
 
 
+(defn pretty-format [item]
+  "Format data structure with proper indentation and formatting using pprint"
+  (if (string? item)
+    item
+    (with-out-str (clojure.pprint/pprint item))))
+
 (defui expandable-item-component [{:keys [item color title truncate-length]
                                    :or {truncate-length 50}}]
   (let [[show-modal set-show-modal] (uix/use-state false)
         item-str (if (string? item) item (pr-str item))
+        pretty-str (pretty-format item)
         is-long? (> (count item-str) truncate-length)
         truncated-str (if is-long?
                         (str (subs item-str 0 (- truncate-length 3)) "...")
                         item-str)]
     ($ :<>
-       ($ :div {:className (str "text-" color "-500 mt-1")}
+       ($ :div {:className (str "text-" color "-500")}
           ($ :span {:className (str "break-words cursor-pointer hover:bg-" color "-100 px-1 py-0.5 rounded")
                     :onClick (fn [e]
                                (.stopPropagation e)
@@ -80,44 +88,86 @@
                     :title "Click to expand"}
              truncated-str))
        
-       ;; Popup modal
+       ;; Popup modal with pretty formatting
        (when show-modal
-         ($ expandable-popup-modal {:content item-str
+         ($ expandable-popup-modal {:content pretty-str
                                     :title title
                                     :on-close #(set-show-modal false)})))))
 
-(defui expandable-list-component [{:keys [items color title-singular truncate-length]
-                                   :or {truncate-length 50}}]
-  (let [[selected-item set-selected-item] (uix/use-state nil)]
-    ($ :<>
-         ($ :div {:className (str "text-" color "-500 mt-1 space-y-1")}
-            (for [[idx item] (map-indexed vector items)]
-              (let [item-str (if (string? item) 
-                                   item 
-                                   (pr-str item))
-                    is-long? (> (count item-str) truncate-length)
-                    truncated-str (if is-long?
-                                    (str (subs item-str 0 (- truncate-length 3)) "...")
-                                    item-str)]
-                ($ :div {:key idx
-                         :className "flex items-center gap-2"}
-                   ($ :span {:className (str "text-" color "-400 text-xs")}
-                      (str (inc idx) "."))
-                                    ($ :span {:className (str "break-words cursor-pointer hover:bg-" color "-100 px-1 py-0.5 rounded")
-                           :onClick (fn [e]
-                                      (.stopPropagation e)
-                                      (set-selected-item {:content (if (string? item) item (pr-str item))
-                                                          :index idx 
-                                                          :title (str title-singular " " (inc idx))}))
-                           :title "Click to expand"}
-                      truncated-str)))))
-         
-       ;; Popup modal
-       (when selected-item
-         ($ expandable-popup-modal {:content (:content selected-item)
-                                    :content-index (:index selected-item)
-                                    :title (:title selected-item)
-                                    :on-close #(set-selected-item nil)})))))
+;; Declare generic-data-viewer first to avoid circular dependency
+(declare generic-data-viewer)
+
+(defui expandable-list-component [{:keys [items color title-singular truncate-length depth]
+                                   :or {truncate-length 50 depth 0}}]
+  ($ :div {:className (str "text-" color "-500 mt-1 space-y-1")}
+     (for [[idx item] (map-indexed vector items)]
+       ($ :div {:key idx
+                :className "flex items-start gap-2"}
+          ($ :span {:className (str "text-" color "-400 text-xs flex-shrink-0 mt-0.5")}
+             (str (inc idx) "."))
+          ;; Recursively render each item using the generic viewer
+          ($ :div {:className "flex-1"}
+             ($ generic-data-viewer {:data item 
+                                     :color color 
+                                     :truncate-length truncate-length
+                                     :depth depth}))))))
+
+(defui generic-data-viewer [{:keys [data color truncate-length depth]
+                             :or {truncate-length 80 depth 0}}]
+  (let [max-depth 3
+        next-depth (inc depth)]
+    (cond
+      ;; Handle nil explicitly
+      (nil? data)
+      ($ :span {:className (str "text-" color "-500 italic")} "nil")
+      
+      ;; If we've hit max depth, fall back to expandable components
+      (>= depth max-depth)
+      (cond
+        (map? data)
+        ($ expandable-item-component {:item data
+                                      :color color
+                                      :title "Map Details"
+                                      :truncate-length truncate-length})
+        (sequential? data)
+        ($ expandable-item-component {:item data
+                                      :color color  
+                                      :title "List Details"
+                                      :truncate-length truncate-length})
+        :else
+        ($ expandable-item-component {:item data
+                                      :color color
+                                      :title "Value Details"
+                                      :truncate-length truncate-length}))
+      
+      ;; Case 1: The data is a map. Render its key-value pairs.
+      (map? data)
+      ($ :div {:className "mt-1 space-y-1 pl-2 border-l border-gray-200"}
+         (for [[k v] (sort-by key data)]
+           ($ :div {:key (str k)}
+              ($ :div {:className "flex items-start gap-1"}
+                 ($ :span {:className "text-gray-500 font-medium"} (str (name k) ":"))
+                 ;; Recursive call to render the value, whatever its type.
+                 ($ generic-data-viewer {:data v 
+                                         :color color 
+                                         :truncate-length truncate-length
+                                         :depth next-depth})))))
+
+      ;; Case 2: The data is a list or vector. Use the existing list component.
+      (sequential? data)
+      ($ expandable-list-component {:items data
+                                     :color color
+                                     :title-singular "Item"
+                                     :truncate-length truncate-length
+                                     :depth next-depth})
+      
+      ;; Case 3: The data is a scalar value (string, number, bool, etc.).
+      ;; Use the existing item component.
+      :else
+      ($ expandable-item-component {:item data
+                                    :color color
+                                    :title "Value Details"
+                                    :truncate-length truncate-length}))))
 
 (defui selected-node-component [{:keys [selected-node graph-data handle-paginate-node loading-nodes flow-nodes set-selected-node set-nodes]}]
   (let [data (when selected-node 
@@ -137,49 +187,45 @@
       ($ :div {:className "mt-6 bg-white shadow-lg rounded-lg border border-gray-200 max-w-4xl"}
          ($ :div {:className "p-6"}
             ;; Node Info Section
-            ($ :div {:className "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"}
-               ($ :div {:className "bg-indigo-50 p-3 rounded-md"}
-                  ($ :div {:className "flex justify-between items-center"}
-                     ($ :span {:className "text-sm font-medium text-indigo-700"} "Node")
-                     ($ :span {:className "text-sm text-indigo-600 font-mono"} node-name))
-                  ($ :div {:className "flex justify-between items-center mt-1"}
-                     ($ :span {:className "text-sm font-medium text-indigo-700"} "ID")
-                     ($ :span {:className "text-xs text-indigo-500 font-mono"} node-id)))
-               
-               
-               ;; Result Section - only show if result is not nil
-               (when result
-                 ($ :div {:className "bg-blue-50 p-3 rounded-md"}
-                    ($ :div {:className "text-sm font-medium text-blue-700 mb-1"} "Result")
-                    ($ expandable-item-component {:item result
-                                                  :color "blue"
-                                                  :title "Result"
-                                                  :truncate-length 100})))
-               
-               ;; Timing Section
-               (when (and start-time finish-time)
-                 ($ :div {:className "bg-yellow-50 p-3 rounded-md"}
-                    ($ :div {:className "text-sm font-medium text-yellow-700 mb-2"} "Timing")
-                    ($ :div {:className "space-y-1"}
-                       ($ :div {:className "flex justify-between"}
-                          ($ :span {:className "text-xs text-yellow-600"} "Duration")
-                          ($ :span {:className "text-xs text-yellow-600 font-mono"} (str duration "ms")))
-                       ($ :div {:className "flex justify-between"}
-                          ($ :span {:className "text-xs text-yellow-600"} "Started")
-                          ($ :span {:className "text-xs text-yellow-600 font-mono"} 
-                             (.toLocaleTimeString (js/Date. start-time))))
-                       ($ :div {:className "flex justify-between"}
-                          ($ :span {:className "text-xs text-yellow-600"} "Finished")
-                          ($ :span {:className "text-xs text-yellow-600 font-mono"} 
-                             (.toLocaleTimeString (js/Date. finish-time))))))))
+            ($ :div {:className "bg-indigo-50 p-3 rounded-md"}
+               ($ :div {:className "flex justify-between items-center"}
+                  ($ :span {:className "text-sm font-medium text-indigo-700"} "Node")
+                  ($ :span {:className "text-sm text-indigo-600 font-mono"} node-name))
+               ($ :div {:className "flex justify-between items-center mt-1"}
+                  ($ :span {:className "text-sm font-medium text-indigo-700"} "ID")
+                  ($ :span {:className "text-xs text-indigo-500 font-mono"} node-id)))
             
+            (when result
+              ($ :div {:className "bg-blue-50 p-3 rounded-md mt-4"}
+                 ($ :div {:className "text-sm font-medium text-blue-700 mb-1"} "Result")
+                 ($ generic-data-viewer {:data result
+                                         :color "blue"
+                                         :truncate-length 100
+                                         :depth 0})))
+            (when (and start-time finish-time)
+              ($ :div {:className "bg-yellow-50 p-3 rounded-md mt-4"}
+                 ($ :div {:className "text-sm font-medium text-yellow-700 mb-2"} "Timing")
+                 ($ :div {:className "space-y-1"}
+                    ($ :div {:className "flex justify-between"}
+                       ($ :span {:className "text-xs text-yellow-600"} "Duration")
+                       ($ :span {:className "text-xs text-yellow-600 font-mono"
+                                 :title (str "Started: " (format-ms start-time) "\nFinished: " (format-ms finish-time))} 
+                          (str duration "ms")))
+                    ($ :div {:className "flex justify-between"}
+                       ($ :span {:className "text-xs text-yellow-600"} "Started")
+                       ($ :span {:className "text-xs text-yellow-600 font-mono"} 
+                          (format-ms start-time)))
+                    ($ :div {:className "flex justify-between"}
+                       ($ :span {:className "text-xs text-yellow-600"} "Finished")
+                       ($ :span {:className "text-xs text-yellow-600 font-mono"} 
+                          (format-ms finish-time))))))
             (when input
               ($ :div {:className "bg-green-50 p-3 rounded-md mt-4"}
                  ($ :div {:className "text-sm font-medium text-green-700 mb-1"} "Input")
-                 ($ expandable-list-component {:items input
-                                               :color "green"
-                                               :title-singular "Input"
-                                               :truncate-length 100})))
+                 ($ generic-data-viewer {:data input
+                                         :color "green"
+                                         :truncate-length 100
+                                         :depth 0})))
             
             (when (not (empty? (:nested-ops data)))
               ($ :div {:className "bg-sky-50 p-3 rounded-md mt-4"}
@@ -188,116 +234,33 @@
                  ($ :div {:className "space-y-2"}
                     (for [op (:nested-ops data)]
                       (let [info (:info op)
-                            op-type (:type op)  ; type is at op level, not in info
-                            op-input (:input info)  ; input is nested inside info
-                            op-response (:response info)  ; FIXED: response is nested inside info
+                            op-type (:type op)
                             start-time (:start-time-millis op)
                             finish-time (:finish-time-millis op)
                             duration (when (and start-time finish-time)
                                        (- finish-time start-time))]
                         ($ :div {:key (str start-time "-" finish-time)
                                  :className "bg-white p-3 rounded border border-sky-200"}
+                           
+                           ;; 1. The Header: Keep this part to display consistent op-level info
                            ($ :div {:className "flex justify-between items-start mb-2"}
                               ($ :div {:className "flex-1"}
                                  ($ :div {:className "flex items-center gap-2"}
                                     ($ :span {:className "text-sm font-medium text-sky-800 bg-sky-100 px-2 py-1 rounded"} 
                                        op-type)
+                                    ;; The generic viewer will show objectName, so this is optional, but nice for a header
                                     (when (:objectName info)
                                       ($ :span {:className "text-sm font-mono text-sky-700"} 
-                                         (:objectName info))))
-                                 
-                                 ;; Model Info (if available)
-                                 (when (and info (or (:modelName info) (:totalTokenCount info)))
-                                   ($ :div {:className "text-xs text-sky-600 mt-1"}
-                                      ($ :span {:className "font-medium"} "model: ")
-                                      ($ :span {:className "text-sky-500"}
-                                         (str (or (:modelName info) "unknown")
-                                              (when (:totalTokenCount info)
-                                                (let [input-tokens (:inputTokenCount info)
-                                                      output-tokens (:outputTokenCount info)
-                                                      total-tokens (:totalTokenCount info)]
-                                                  (if (and input-tokens output-tokens)
-                                                    (str " (" input-tokens "+" output-tokens "=" total-tokens " tokens)")
-                                                    (str " (" total-tokens " tokens)"))))
-                                              #_(when (:finishReason info)
-                                                 (str " [" (:finishReason info) "]"))))))
-                                 
-                                 ;; Input (for model calls)
-                                 (when op-input
-                                   ($ :div {:className "text-xs text-sky-600 mt-1"}
-                                      ($ :span {:className "font-medium"} "input: ")
-                                      ($ expandable-list-component {:items op-input
-                                                                    :color "sky"
-                                                                    :title-singular "Input Message"
-                                                                    :truncate-length 60})))
-                                 
-                                 ;; Response (for model calls)
-                                 (when op-response
-                                   ($ :div {:className "text-xs text-sky-600 mt-1"}
-                                      ($ :span {:className "font-medium"} "response: ")
-                                      ($ expandable-item-component {:item op-response
-                                                                    :color "sky"
-                                                                    :title "Model Response"
-                                                                    :truncate-length 60})))
-                                 
-                                 ;; Store Operation Details
-                                 (when (and info (contains? #{:store-read :store-write} op-type))
-                                   ($ :<>
-                                      (when (:op info)
-                                        ($ :div {:className "text-xs text-sky-600 mt-1"}
-                                           ($ :span {:className "font-medium"} "operation: ")
-                                           ($ :span {:className "text-sky-500 font-mono"} (:op info))))
-                                      (when (:params info)
-                                        ($ :div {:className "text-xs text-sky-600 mt-1"}
-                                           ($ :span {:className "font-medium"} "params: ")
-                                           ($ expandable-item-component {:item (:params info)
-                                                                         :color "sky"
-                                                                         :title "Store Parameters"
-                                                                         :truncate-length 60})))
-                                      (when (and (:result info) (= op-type :store-read))
-                                        ($ :div {:className "text-xs text-sky-600 mt-1"}
-                                           ($ :span {:className "font-medium"} "result: ")
-                                           ($ expandable-item-component {:item (:result info)
-                                                                         :color "sky"
-                                                                         :title "Store Result"
-                                                                         :truncate-length 60})))))
-                                 
-                                 ;; DB Operation Details
-                                 (when (and info (contains? #{:db-read :db-write} op-type))
-                                   ($ :<>
-                                      (when (:op info)
-                                        ($ :div {:className "text-xs text-sky-600 mt-1"}
-                                           ($ :span {:className "font-medium"} "operation: ")
-                                           ($ :span {:className "text-sky-500 font-mono"} (:op info))))
-                                      (when (:params info)
-                                        ($ :div {:className "text-xs text-sky-600 mt-1"}
-                                           ($ :span {:className "font-medium"} "params: ")
-                                           ($ expandable-item-component {:item (:params info)
-                                                                         :color "sky"
-                                                                         :title "DB Parameters"
-                                                                         :truncate-length 60})))
-                                      (when (:result info)
-                                        ($ :div {:className "text-xs text-sky-600 mt-1"}
-                                           ($ :span {:className "font-medium"} "result: ")
-                                           ($ expandable-item-component {:item (:result info)
-                                                                         :color "sky"
-                                                                         :title "DB Result"
-                                                                         :truncate-length 60})))))
-                                 
-                                 ;; Custom Operation Details (for :other and :agent-invoke)
-                                 (when (and info (contains? #{:other :agent-invoke} op-type) (not (empty? info)))
-                                   ($ :div {:className "text-xs text-sky-600 mt-1"}
-                                      ($ :span {:className "font-medium"} "details: ")
-                                      ($ expandable-item-component {:item info
-                                                                    :color "sky"
-                                                                    :title (str "Custom Operation Info (" (name op-type) ")")
-                                                                    :truncate-length 60}))))
+                                         (:objectName info)))))
+                              ;; Always display the duration
                               (when duration
                                 ($ :div {:className "text-xs text-sky-500 font-mono"
-                                         :title (str (format-ms start-time)
-                                                     " to "
-                                                     (format-ms finish-time))}
-                                   (str duration "ms"))))))))))
+                                         :title (str "Started: " (format-ms start-time) "\nFinished: " (format-ms finish-time))}
+                                   (str duration "ms"))))
+
+                           ;; 2. The Body: Replace all specific logic with the generic viewer
+                           ($ :div {:className "text-xs text-sky-600 mt-1"}
+                              ($ generic-data-viewer {:data info :color "sky" :depth 0})))))))))
             
                ;; Emits Section (full width)
             (when (and emits (> (count emits) 0))
@@ -332,16 +295,17 @@
                            ($ :div {:className "text-xs text-purple-600"}
                               ($ :div (str "→ " (:node-name emit)))
                               (when (:args emit)
-                                ($ expandable-list-component {:items (:args emit)
-                                                              :color "purple"
-                                                              :title-singular "Argument"}))
+                                ($ generic-data-viewer {:data (:args emit)
+                                                        :color "purple"
+                                                        :truncate-length 60
+                                                        :depth 0}))
                               ($ :div {:className "text-purple-400 mt-1 font-mono text-xs"}
                                  (str "ID: " emit-id))
                               (when is-loading
                                 ($ :div {:className "text-purple-400 mt-1 text-xs italic"}
                                    "Loading...")))))))))
             
-               )))))
+               ))))
 
 (defui forking-input-component [{:keys [selected-node changed-nodes set-changed-nodes affected-nodes]}]
   (let [data (when selected-node 
@@ -382,10 +346,10 @@
                     "This node's execution will be re-determined when the fork is executed.")
                  ($ :div {:className "text-xs text-gray-500"}
                     ($ :span {:className "font-medium"} "Current input: ")
-                    ($ expandable-list-component {:items (if (array? original-input) original-input [original-input])
-                                                  :color "gray"
-                                                  :title-singular "Input"
-                                                  :truncate-length 80}))))
+                    ($ generic-data-viewer {:data original-input
+                                            :color "gray"
+                                            :truncate-length 80
+                                            :depth 0}))))
               
               ;; Show normal editing interface for unaffected nodes
               ($ :div {:className "space-y-4"}
@@ -402,10 +366,11 @@
                  
                  ($ :div {:className "text-xs text-gray-500"}
                     ($ :span {:className "font-medium"} "Original: ")
-                    ($ expandable-list-component {:items (if (array? original-input) original-input [original-input])
-                                                  :color "gray"
-                                                  :title-singular "Original Input"
-                                                  :truncate-length 80}))))))))
+                    ($ generic-data-viewer {:data original-input
+                                            :color "gray"
+                                            :truncate-length 80
+                                            :depth 0}))))))))
+
 
 (defui info-panel [{:keys [graph-data summary-data]}]
   (let [result (:result summary-data)
@@ -422,9 +387,10 @@
                (if failure?
                  ($ :span {:className "px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium"} "Failed")
                  ($ :span {:className "px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium"} "Success")))
-            ($ expandable-item-component {:item result-val
-                                          :color (if failure? "red" "green")
-                                          :title "Final Result Details"})))
+            ($ generic-data-viewer {:data result-val
+                                    :color (if failure? "red" "green")
+                                    :truncate-length 100
+                                    :depth 0})))
 
        ($ :div {:className "text-sm font-medium text-gray-700 pt-2 border-t border-gray-200"} "Overall Stats")
 

@@ -11,6 +11,11 @@
   (shadow/watch :frontend)
   (aor/start-ui ipc))
 
+(defn stop-repl [ipc]
+  (aor/stop-ui)
+  (close! ipc))
+
 (comment
-  (start-repl (open-cluster-manager-internal {"conductor.host" "localhost"}))
-  (aor/stop-ui))
+  (def ipc (open-cluster-manager-internal {"conductor.host" "localhost"}))
+  (start-repl ipc)
+  (stop-repl ipc))
