@@ -26,9 +26,11 @@
     AgentsTopology
     AgentStream
     AgentStreamByInvoke
+    HumanInputRequest
     MultiAgg$Impl
     UpdateMode]
    [com.rpl.agentorama.impl
+    IFetchAgentClient
     IFetchAgentObject]
    [com.rpl.rama
     PState$Declaration
@@ -43,6 +45,12 @@
    [rpl.rama.generated
     TopologyDoesNotExistException]))
 
+(defn- check-unique-agent-name!
+  [agents-vol mirror-agents-vol name]
+  (when (or (contains? @agents-vol name)
+            (contains? @mirror-agents-vol name))
+    (throw (h/ex-info "Agent already exists" {:name name}))))
+
 (defn agents-topology
   [setup topologies]
   (let [^StreamTopology stream-topology (stream-topology
@@ -53,13 +61,13 @@
                               aor-types/AGENTS-MB-TOPOLOGY-NAME)
         defined?-vol         (volatile! false)
         agents-vol           (volatile! {})
+        mirror-agents-vol    (volatile! {})
         store-info-vol       (volatile! {})
         declared-objects-vol (volatile! {})]
     (reify
      AgentsTopology
      (newAgent [this name]
-       (when (contains? @agents-vol name)
-         (throw (h/ex-info "Agent already exists" {:name name})))
+       (check-unique-agent-name! agents-vol mirror-agents-vol name)
        (let [ret (graph/mk-agent-graph)]
          (vswap! agents-vol assoc name ret)
          ret))
@@ -109,6 +117,15 @@
         name
         (h/convert-jfn jfn)
         (i/convert-agent-object-options options)))
+     (declareClusterAgent [this localName moduleName agentName]
+       (check-unique-agent-name! agents-vol mirror-agents-vol localName)
+       ;; this connects the modules so a module update removing an agent needed
+       ;; by another module fails
+       (mirror-depot* setup
+                      (gensym (str "*_mirrorAgentDepot" agentName))
+                      moduleName
+                      (po/agent-depot-name agentName))
+       (vswap! mirror-agents-vol assoc localName [moduleName agentName]))
      (define [this]
        (when @defined?-vol
          (throw (h/ex-info "Agents topology already defined" {})))
@@ -119,6 +136,7 @@
         stream-topology
         mb-topology
         @agents-vol
+        @mirror-agents-vol
         @store-info-vol
         @declared-objects-vol))
      aor-types/AgentsTopologyInternal
@@ -194,6 +212,10 @@
                                                     name
                                                     afn
                                                     options)))
+
+(defn declare-cluster-agent
+  [^AgentsTopology agents-topology local-name module-name agent-name]
+  (.declareClusterAgent agents-topology local-name module-name agent-name))
 
 (defn setup-object-name
   [^AgentObjectSetup setup]
@@ -367,11 +389,11 @@
                                    module-name
                                    (queries/tracing-query-name
                                     agentName))
-             invokes-page-query (foreign-query
-                                 cluster
-                                 module-name
-                                 (queries/agent-get-invokes-page-query-name
-                                  agentName))
+             invokes-page-query   (foreign-query
+                                   cluster
+                                   module-name
+                                   (queries/agent-get-invokes-page-query-name
+                                    agentName))
 
              current-graph-query  (foreign-query
                                    cluster
@@ -568,8 +590,8 @@
          ))))))
 
 (defn agent-client
-  ^AgentClient [^AgentManager agent-manager agent-name]
-  (.getAgentClient agent-manager agent-name))
+  ^AgentClient [^IFetchAgentClient agent-client-fetcher agent-name]
+  (.getAgentClient agent-client-fetcher agent-name))
 
 (defn agent-names
   [^AgentManager agent-manager]
@@ -618,6 +640,10 @@
   ^CompletableFuture
   [^AgentClient client agent-invoke]
   (.nextStepAsync client agent-invoke))
+
+(defn human-input-request?
+  [obj]
+  (instance? HumanInputRequest obj))
 
 (defn agent-result
   [^AgentClient agent-client agent-invoke]
@@ -680,9 +706,12 @@
   [^AgentClient client request response]
   (.provideHumanInputAsync client request response))
 
-(defn start-ui ^java.io.Closeable [ipc]
-  (let [start-fn (requiring-resolve 'com.rpl.agent-o-rama.impl.ui.core/start-ui)]
-    (start-fn ipc)))
+(defn start-ui
+  (^java.io.Closeable [ipc] (start-ui ipc nil))
+  (^java.io.Closeable [ipc options]
+   (let [start-fn (requiring-resolve
+                   'com.rpl.agent-o-rama.impl.ui.core/start-ui)]
+     (start-fn ipc options))))
 
 (defn stop-ui []
   (let [stop-fn (requiring-resolve 'com.rpl.agent-o-rama.impl.ui.core/stop-ui)]

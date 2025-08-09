@@ -101,7 +101,8 @@
            :db-write
            :db-read
            :model-call
-           :agent-invoke
+           :tool-call
+           :agent-call
            :human-input
            :other)
    ;; info for models contains token stats, input prompt, output, etc.
