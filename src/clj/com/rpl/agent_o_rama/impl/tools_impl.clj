@@ -10,8 +10,6 @@
    [com.rpl.rama.ops :as ops]
    [jsonista.core :as j])
   (:import
-   [com.rpl.agentorama
-    InvalidToolNameException]
    [dev.langchain4j.agent.tool
     ToolExecutionRequest
     ToolSpecification]
