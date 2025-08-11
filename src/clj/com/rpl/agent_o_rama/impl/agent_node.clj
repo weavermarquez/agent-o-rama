@@ -766,7 +766,10 @@
             task-id
             invoke-id
             retry-num
-            (h/throwable->str t))
+            (h/throwable->str t)
+            (-> agent-node
+                agent-node-state
+                :nested-ops))
            :append-ack)
           (throw t))
         (finally

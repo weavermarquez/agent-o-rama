@@ -382,7 +382,7 @@
    (:> *agent-task-id *fork-agent-id *retry-num *op)))
 
 (deframaop intake-node-failure
-  [*agent-name {:keys [*invoke-id *retry-num *throwable-str]}]
+  [*agent-name {:keys [*invoke-id *retry-num *throwable-str *nested-ops]}]
   (<<with-substitutions
    [$$root (po/agent-root-task-global *agent-name)
     $$nodes (po/agent-node-task-global *agent-name)
@@ -395,6 +395,8 @@
                                   *agent-task-id
                                   *agent-id
                                   *retry-num)
+   (local-transform> [(keypath *invoke-id) :nested-ops (termval *nested-ops)]
+                     $$nodes)
    (|direct *agent-task-id)
    (local-transform>
     [(must *agent-id)
@@ -799,7 +801,6 @@
                         (set-elem *request)
                         NONE>]
                        $$root)
-     (local-select> (keypath *agent-id) $$root :> *tmp)
    )))
 
 (deframaop handle-config
@@ -920,7 +921,6 @@
                     (termval (aor-types/->valid-AggInput *invoke-id
                                                          *args))])]
       $$nodes)
-     (local-select> (keypath *agg-invoke-id) $$nodes :> *tmp)
 
      ;; by not acking here and going straight go complete-agg!, it also prevents
      ;; rest of agg subgraph from ever completing and calling complete-agg!
@@ -1066,7 +1066,6 @@
          )))
      ;; replicate writes before initiating RetryNodeComplete
      (|direct (ops/current-task-id))
-     (local-select> [(keypath *invoke-id) :emits] $$nodes :> *tmp)
      (depot-partition-append!
       *agent-depot
       (aor-types/->valid-RetryNodeComplete *invoke-id

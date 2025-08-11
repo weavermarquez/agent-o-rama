@@ -2,7 +2,6 @@
   (:use [com.rpl.rama]
         [com.rpl.rama.path])
   (:require
-   [clojure.set :as set]
    [com.rpl.agent-o-rama.impl.agent-node :as anode]
    [com.rpl.agent-o-rama.impl.client :as iclient]
    [com.rpl.agent-o-rama.impl.core :as i]
@@ -12,7 +11,8 @@
    [com.rpl.agent-o-rama.impl.pobjects :as po]
    [com.rpl.agent-o-rama.impl.queries :as queries]
    [com.rpl.agent-o-rama.impl.store-impl :as simpl]
-   [com.rpl.agent-o-rama.impl.types :as aor-types])
+   [com.rpl.agent-o-rama.impl.types :as aor-types]
+   [com.rpl.rama.aggs :as aggs])
   (:import
    [com.rpl.agentorama
     AgentClient
@@ -146,26 +146,15 @@
                            {:actual-type (class afn)})))
        (when (contains? @declared-objects-vol name)
          (throw (h/ex-info "Object already declared" {:name name})))
-       (let [invalid-opts (set/difference (-> options
-                                              keys
-                                              set)
-                                          #{:thread-safe?
-                                            :auto-tracing?
-                                            :worker-object-limit})
-             full-options (merge {:thread-safe?        false
+       (let [full-options (merge {:thread-safe?        false
                                   :auto-tracing?       true
                                   :worker-object-limit 1000}
                                  options)]
-         (when-not (empty? invalid-opts)
-           (throw (h/ex-info "Invalid agent object options"
-                             {:name name :invalid-keys invalid-opts})))
-         (h/validate-option! name full-options :thread-safe? boolean?)
-         (h/validate-option! name full-options :auto-tracing? boolean?)
-         (h/validate-option! name
-                             full-options
-                             :worker-object-limit
-                             integer?
-                             pos?)
+         (h/validate-options! name
+                              full-options
+                              {:thread-safe?        h/boolean-spec
+                               :auto-tracing?       h/boolean-spec
+                               :worker-object-limit h/positive-number-spec})
          (vswap! declared-objects-vol
                  assoc
                  name
@@ -222,33 +211,20 @@
   (.getObjectName setup))
 
 (defn new-agent
-  [^AgentsTopology agents-topology name]
-  (.newAgent agents-topology name))
+  [agents-topology name]
+  (i/new-agent agents-topology name))
 
 (defn node
   [agent-graph name output-nodes-spec node-fn]
-  (graph/internal-add-node!
-   agent-graph
-   name
-   output-nodes-spec
-   (aor-types/->Node node-fn)))
+  (i/node agent-graph name output-nodes-spec node-fn))
 
 (defn agg-start-node
   [agent-graph name output-nodes-spec node-fn]
-  (graph/internal-add-node!
-   agent-graph
-   name
-   output-nodes-spec
-   (aor-types/->NodeAggStart node-fn nil)))
+  (i/agg-start-node agent-graph name output-nodes-spec node-fn))
 
 (defn agg-node
   [agent-graph name output-nodes-spec agg node-fn]
-  (graph/internal-add-agg-node!
-   agent-graph
-   name
-   output-nodes-spec
-   agg
-   node-fn))
+  (i/agg-node agent-graph name output-nodes-spec agg node-fn))
 
 (defn set-update-mode
   [^AgentGraph agent-graph mode]
@@ -279,12 +255,12 @@
      )))
 
 (defn emit!
-  [^AgentNode agent-node node & args]
-  (.emit agent-node node (into-array Object args)))
+  [agent-node node & args]
+  (apply i/emit! agent-node node args))
 
 (defn result!
-  [^AgentNode agent-node val]
-  (.result agent-node val))
+  [agent-node val]
+  (i/result! agent-node val))
 
 (defn get-store
   [^AgentNode agent-node name]
@@ -299,8 +275,7 @@
   (.streamChunk agent-node chunk))
 
 (defn record-nested-op!
-  [agent-node nested-op-type start-time-millis finish-time-millis
-   info-map]
+  [agent-node nested-op-type start-time-millis finish-time-millis info-map]
   (anode/record-nested-op!-impl agent-node
                                 nested-op-type
                                 start-time-millis
@@ -713,6 +688,7 @@
                    'com.rpl.agent-o-rama.impl.ui.core/start-ui)]
      (start-fn ipc options))))
 
-(defn stop-ui []
+(defn stop-ui
+  []
   (let [stop-fn (requiring-resolve 'com.rpl.agent-o-rama.impl.ui.core/stop-ui)]
     (stop-fn)))
