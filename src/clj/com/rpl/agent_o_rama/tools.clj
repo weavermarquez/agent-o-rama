@@ -34,9 +34,9 @@
      (when-not (instance? ToolSpecification tool-specification)
        (throw (h/ex-info "Invalid tool specification"
                          {:type (class tool-specification)})))
-     (aor-types/->ToolInfo tool-specification
-                           tool-fn
-                           (:include-context? options))
+     (aor-types/->ToolInfoImpl tool-specification
+                               tool-fn
+                               (:include-context? options))
    )))
 
 (defn error-handler-static-string [s]
@@ -68,10 +68,13 @@
   (let [tuples (transform [(view vec) ALL LAST] (fn [s] (constantly s)) tuples)]
     (error-handler-by-type tuples)))
 
+(defn hook:new-tools-agent-options [name options])
+
 (defn new-tools-agent
   ([topology name tools]
    (new-tools-agent topology name tools nil))
   ([topology name tools options]
+   (hook:new-tools-agent-options name options)
    (let [options (merge {:error-handler (error-handler-default)}
                         options)]
      (h/validate-options! name

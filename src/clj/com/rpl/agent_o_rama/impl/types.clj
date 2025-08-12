@@ -10,7 +10,8 @@
    [com.rpl.agentorama
     AgentComplete
     AgentInvoke
-    HumanInputRequest]
+    HumanInputRequest
+    ToolInfo]
    [com.rpl.agentorama.impl
     NippyMap]
    [com.rpl.rama.integration
@@ -228,10 +229,12 @@
    path :- s/Any
    key :- s/Any])
 
-(drp/defrecord+ ToolInfo
+(drp/defrecord+ ToolInfoImpl
   [tool-specification :- ToolSpecification
    tool-fn :- clojure.lang.IFn
-   include-context? :- Boolean])
+   include-context? :- Boolean]
+  ToolInfo
+  (getToolSpecification [this] tool-specification))
 
 (defprotocol AgentsTopologyInternal
   (declare-agent-object-builder-internal [this name afn options]))
