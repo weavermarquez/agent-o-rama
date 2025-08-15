@@ -7,6 +7,7 @@
    [com.rpl.agent-o-rama.impl.core :as i]
    [com.rpl.agent-o-rama.impl.helpers :as h]
    [com.rpl.agent-o-rama.impl.types :as aor-types]
+   [com.rpl.agent-o-rama.throttled-logging :as tl]
    [com.rpl.rama.ops :as ops]
    [jsonista.core :as j])
   (:import
@@ -96,6 +97,7 @@
                 (i/emit! agent-node
                          "agg-results"
                          (ToolExecutionResultMessage/from request error-ret))
+                (tl/warn :tool-exec-error t "Tool execution exception")
                 (anode/record-nested-op!-impl
                  agent-node
                  :tool-call
