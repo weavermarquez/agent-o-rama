@@ -63,7 +63,7 @@
     )}))
 
 (defn analyst-persona
-  [{:keys [name role affiliation description]}]
+  [{:strs [name role affiliation description]}]
   (format
    "Name: %s\nRole: %s\nAffiliation: %s\nDescription: %s"
    name
@@ -271,7 +271,8 @@ Here are the sections to reflect on for writing: %s")
   [topic sections]
   (format INTRO-CONCLUSION-INSTRUCTIONS topic sections))
 
-(def MAPPER (j/object-mapper {:decode-key-fn keyword}))
+(def KW-MAPPER (j/object-mapper {:decode-key-fn keyword}))
+(def STR-MAPPER (j/object-mapper {:decode-key-fn str}))
 
 (defn wiki-search
   [^String query]
@@ -280,7 +281,7 @@ Here are the sections to reflect on for writing: %s")
                  (java.net.URLEncoder/encode query "UTF-8"))
         {:keys [status body]} @(http/get url)]
     (if (= status 200)
-      (let [data (j/read-value body MAPPER)]
+      (let [data (j/read-value body KW-MAPPER)]
         (mapv :title (get-in data [:query :search])))
       (throw (ex-info "Wikipedia search failed" {:status status})))))
 
@@ -292,7 +293,7 @@ Here are the sections to reflect on for writing: %s")
              (java.net.URLEncoder/encode title "UTF-8"))
         {:keys [status body]} @(http/get url)]
     (if (= status 200)
-      (let [data    (j/read-value body MAPPER)
+      (let [data    (j/read-value body KW-MAPPER)
             pages   (vals (get-in data [:query :pages]))
             extract (-> pages
                         first
@@ -425,8 +426,8 @@ Here are the sections to reflect on for writing: %s")
      "create-analysts"
      "feedback"
      (fn [agent-node human-feedback options]
-       (let [{:keys [topic max-analysts max-turns] :as options}
-             (merge {:max-analysts 4 :max-turns 2} options)
+       (let [{:strs [topic max-analysts max-turns] :as options}
+             (merge {"max-analysts" 4 "max-turns" 2} options)
              ;; - JSON schemas not supported by streaming model, so have to use
              ;; non-streaming here
              openai (aor/get-agent-object agent-node "openai-non-streaming")
@@ -439,10 +440,10 @@ Here are the sections to reflect on for writing: %s")
                           {:response-format (lc4j/json-response-format
                                              "analysts"
                                              ANALYST-RESPONSE-SCHEMA)}))
-                        (j/read-value MAPPER))]
+                        (j/read-value STR-MAPPER))]
          (aor/emit! agent-node
                     "feedback"
-                    (:analysts res)
+                    (get res "analysts")
                     options)
        )))
     (aor/node
@@ -462,7 +463,7 @@ Here are the sections to reflect on for writing: %s")
     (aor/agg-start-node
      "questions"
      "generate-question"
-     (fn [agent-node analysts {:keys [topic max-turns :as config]}]
+     (fn [agent-node analysts {:strs [topic max-turns] :as config}]
        (doseq [analyst analysts]
          (aor/emit! agent-node
                     "generate-question"
@@ -484,7 +485,7 @@ Here are the sections to reflect on for writing: %s")
              search-query (generate-search-query openai new-messages)]
          (aor/emit! agent-node "search-web" search-query)
          (aor/emit! agent-node "search-wikipedia" search-query)
-         {:persona persona :messages new-messages :max-turns max-turns}
+         {"persona" persona "messages" new-messages "max-turns" max-turns}
        )))
     (aor/node
      "search-web"
@@ -518,7 +519,7 @@ Here are the sections to reflect on for writing: %s")
      "agg-research"
      ["generate-question" "write-section"]
      aggs/+vec-agg
-     (fn [agent-node searches {:keys [persona messages max-turns]}]
+     (fn [agent-node searches {:strs [persona messages max-turns]}]
        (let [openai       (aor/get-agent-object agent-node "openai")
              context      (str/join "\n---\n" searches)
              instr        (answer-instructions persona context)
@@ -566,7 +567,7 @@ Here are the sections to reflect on for writing: %s")
      "agg-sections"
      "begin-report"
      aggs/+vec-agg
-     (fn [agent-node sections {:keys [topic]}]
+     (fn [agent-node sections {:strs [topic]}]
        (aor/emit! agent-node "begin-report" sections topic)))
     (aor/agg-start-node
      "begin-report"
@@ -587,7 +588,7 @@ Here are the sections to reflect on for writing: %s")
                       [(SystemMessage. instr)]
                       [(UserMessage.
                         "Write a report based upon these memos.")]))]
-         (aor/emit! agent-node "finish-report" :report text)
+         (aor/emit! agent-node "finish-report" "report" text)
        )))
     (aor/node
      "write-intro"
@@ -601,7 +602,7 @@ Here are the sections to reflect on for writing: %s")
                       [(SystemMessage. instr)]
                       [(UserMessage.
                         "Write the report introduction")]))]
-         (aor/emit! agent-node "finish-report" :intro text)
+         (aor/emit! agent-node "finish-report" "intro" text)
        )))
     (aor/node
      "write-conclusion"
@@ -615,13 +616,13 @@ Here are the sections to reflect on for writing: %s")
                       [(SystemMessage. instr)]
                       [(UserMessage.
                         "Write the report conclusion")]))]
-         (aor/emit! agent-node "finish-report" :conclusion text)
+         (aor/emit! agent-node "finish-report" "conclusion" text)
        )))
     (aor/agg-node
      "finish-report"
      nil
      aggs/+map-agg
-     (fn [agent-node {:keys [report intro conclusion]} _]
+     (fn [agent-node {:strs [report intro conclusion]} _]
        (let [report           (str/replace report #"## Insights" "")
              [report sources] (str/split report #"## Sources")
              combined         (str intro
@@ -637,7 +638,7 @@ Here are the sections to reflect on for writing: %s")
 (defn run-research-agent
   []
   (with-open [ipc (rtest/create-ipc)
-              ui (aor/start-ui ipc)]
+              ui  (aor/start-ui ipc)]
     (rtest/launch-module! ipc ResearchAgentModule {:tasks 4 :threads 2})
     (let [module-name   (get-module-name ResearchAgentModule)
           agent-manager (aor/agent-manager ipc module-name)
@@ -645,7 +646,7 @@ Here are the sections to reflect on for writing: %s")
           _ (print "Enter a topic: ")
           _ (flush)
           topic         (read-line)
-          inv           (aor/agent-initiate researcher "" {:topic topic})]
+          inv           (aor/agent-initiate researcher "" {"topic" topic})]
       (println)
       (loop [step (aor/agent-next-step researcher inv)]
         (if (instance? HumanInputRequest step)
