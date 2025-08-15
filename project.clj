@@ -19,9 +19,12 @@
 
                  ;; ui dependencies
                  [ring/ring-core "1.9.5"]
-                 [ring/ring-jetty-adapter "1.8.2"]
+                 [http-kit "2.8.0"]
                  [ring/ring-codec "1.2.0"]
-                 [metosin/reitit "0.7.2"]]
+                 [com.taoensso/sente "1.20.0"]
+                 [ring/ring-defaults "0.4.0"]
+                 [com.cognitect/transit-clj "1.0.333"]
+                 [com.cognitect/transit-cljs "0.8.280"]]
   :global-vars {*warn-on-reflection* true}
   :repositories
   [["releases"

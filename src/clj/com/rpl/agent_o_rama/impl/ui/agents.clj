@@ -5,66 +5,30 @@
    [com.rpl.agent-o-rama :as aor]
    [com.rpl.agent-o-rama.impl.types :as aor-types]
    [com.rpl.agent-o-rama.impl.ui :as ui]
+   [com.rpl.agent-o-rama.impl.json-serialize :as jser]
    [clojure.walk :as walk]
-   [muuntaja.core :as m])
+   [jsonista.core :as j])
   (:import
-   [com.rpl.agentorama AgentInvoke]))
+   [com.rpl.agentorama AgentInvoke]
+   [java.net URLEncoder URLDecoder]))
 
-(def m (m/create))
-(def encoder (m/encoder m "application/transit+json"))
+(defn url-encode [s]
+  "Encode string for safe use in URLs using standard URL encoding"
+  (java.net.URLEncoder/encode ^String s "UTF-8"))
 
-(defn filter-encodable
-  [data]
-  (walk/postwalk
-   (fn [x]
-     (try
-       (encoder x)
-       x
-       (catch Exception e
-         (str x))))
-   data))
-
-(defn replace-slash [s]
-  "because urlencoding causes jetty to 400 with Ambiguous URI path separator"
-  ;; TODO use proper urlencoding, fix jetty error
-  (clojure.string/replace s #"/" "::"))
-
-(defn unreplace-slash [s]
-  "reverse of above function"
-  (clojure.string/replace s #"::" "/"))
-
-(comment
-  (replace-slash "example.core/FlowModule")
-  (unreplace-slash "example.core::FlowModule"))
-
-(defn index [{:keys [parameters]}]
-  {:status
-   200
-   
-   :body
-   (for [[module-name agent-name]
-         (select [ALL (collect-one FIRST) LAST :clients MAP-KEYS] (ui/get-object :aor-cache))]
-     {:module-id (replace-slash module-name)
-      :agent-name (replace-slash agent-name)})})
+(defn url-decode [s]
+  "Decode URL-encoded string using standard URL decoding"
+  (java.net.URLDecoder/decode ^String s "UTF-8"))
 
 (defn get-client [module-id agent-name]
-  (select-one [(unreplace-slash module-id)
+  ;; Expects already-decoded module-id and agent-name (API handlers decode them)
+  (select-one [module-id
                :clients
-               (unreplace-slash agent-name)]
+               agent-name]
               (ui/get-object :aor-cache)))
 
 (defn objects [module-id agent-name]
   (aor-types/underlying-objects (get-client module-id agent-name)))
-
-(defn get-graph [{{:keys [module-id agent-name]} :path-params}]
-  {:status
-   200
-   
-   :body
-   {:graph
-    (foreign-invoke-query
-     (:current-graph-query
-      (objects module-id agent-name)))}})
 
 (defn manually-trigger-invoke [{{:keys [module-id agent-name]} :path-params
                                 {:keys [args]} :body-params
@@ -76,24 +40,6 @@
      :body
      {:task-id (.getTaskId inv)
       :invoke-id (.getAgentInvokeId inv)}}))
-
-(defn get-invokes [{{:keys [module-id agent-name]} :path-params :as req}]
-  (let [parsed-pagination-information
-        (transform [(multi-path MAP-KEYS
-                                MAP-VALS)]
-                   parse-long
-                   (-> req :query-params))
-        pagination
-        (if (= {} parsed-pagination-information)
-          nil
-          parsed-pagination-information)]
-    {:status
-     200
-     
-     :body
-     (filter-encodable (foreign-invoke-query
-                        (:invokes-page-query (objects module-id agent-name))
-                        10 pagination))}))
 
 (defn remove-implicit-nodes
   "Preprocesses the invokes-map to remove implicit nodes and rewire edges to real nodes.
@@ -107,121 +53,204 @@
                                [id (:invoked-agg-invoke-id node)]))]
                       invokes-map))]
     (->> invokes-map
-         (setval [ALL 
+         (setval [ALL
                   (selected? LAST (must :invoked-agg-invoke-id))]
                  NONE)
-         (transform [ALL 
-                     LAST 
-                     (must :emits) 
-                     ALL 
+         (transform [ALL
+                     LAST
+                     (must :emits)
+                     ALL
                      :invoke-id]
                     #(get implicit->real % %)))))
 
+(defn ->ui-serializable
+  [data]
+  (walk/postwalk
+   (fn [item]
+     (if (satisfies? jser/JSONFreeze item)
+       (jser/json-freeze*-with-type item)
+       item))
+   data))
 
-(defn generate-implicit-edges
-  "Compares the static historical graph with the dynamic invocation trace to find
-   paths to aggregation nodes that could have been taken but were not."
-  [invokes-map historical-graph]
-  (let [;; A map from {agg-node-invoke-id -> #{emitter-invoke-ids}}
-        actual-emits-to-aggs (into {}
-                                   (for [[id data] invokes-map
-                                         :when (:agg-state data)] ; Check if it's an agg-node trace
-                                     [id (set (map :invoke-id (:agg-inputs-first-10 data)))]))]
-    (->> invokes-map
-         (mapcat (fn [[invoke-id invoke-data]]
-                   (let [node-name     (:node invoke-data)
-                         static-info   (get-in historical-graph [:node-map node-name])
-                         agg-context   (:agg-context static-info)
-                         potential-outputs (:output-nodes static-info)]
-                     
-                     ;; Only consider nodes that are inside an aggregation context
-                     (when agg-context
-                       (for [out-name potential-outputs
-                             ;; We only care about potential outputs that ARE aggregation nodes
-                             :when (= :agg-node (get-in historical-graph [:node-map out-name :node-type]))]
-                         (let [;; This is the invoke-id of the aggregation this node belongs to.
-                               agg-node-invoke-id (:agg-invoke-id invoke-data)
-                               actual-emitters    (get actual-emits-to-aggs agg-node-invoke-id)
-                               did-emit?          (contains? actual-emitters invoke-id)]
-                           
-                           (when (and (not did-emit?) agg-node-invoke-id)
-                             {:source      (str invoke-id)
-                              :target      (str agg-node-invoke-id)
-                              :id          (str "implicit-" invoke-id "-" agg-node-invoke-id)
-                              :implicit?   true})))))))
-         (filter some?)
-         (vec))))
+(defn from-ui-serializable
+  [data]
+  (walk/postwalk
+   jser/json-thaw*
+   data))
 
 (defn parse-url-pair [s]
   (let [[task-id agent-id] (clojure.string/split s #"-")]
     [(parse-long task-id) (parse-long agent-id)]))
 
-(defn invoke-paginated
-  [{{:keys [module-id agent-name invoke-id]} :path-params
-    {:strs [paginate-task-id missing-node-id]} :query-params
-    :as req}]
+;; ============================================================================
+;; LIVE GRAPH SUPPORT (server-side helper)
+;; ============================================================================
 
-  (let [
-        client-objects (objects module-id agent-name)
+(defn current-invocation-invokes-map
+  "Return the cleaned invokes-map for a specific invocation starting from given leaves.
+   - Keeps filter-encodable and remove-implicit-nodes
+   - Supports pagination from leaf nodes or root
+   - Returns both the invokes-map and next-task-invoke-pairs for continued pagination"
+  [module-id agent-name invoke-id start-pairs]
+  (let [client-objects (objects module-id agent-name)
+        tracing-query (:tracing-query client-objects)
+        [agent-task-id _] (parse-url-pair invoke-id)
+        dynamic-trace (when (and agent-task-id (seq start-pairs))
+                        (foreign-invoke-query tracing-query
+                                              agent-task-id
+                                              start-pairs
+                                              100))]
+    (when dynamic-trace
+      {:invokes-map (when-let [invokes-map (:invokes-map dynamic-trace)]
+                      (-> invokes-map
+                          (remove-implicit-nodes)))
+       :next-task-invoke-pairs (:next-task-invoke-pairs dynamic-trace)})))
+
+;; =============================================================================
+;; SENTE API HANDLERS
+;; =============================================================================
+
+(defmulti api-handler
+  "Handle API requests. Receives [event-id data uid] and returns response data.
+   Exceptions are automatically caught and returned as errors."
+  (fn [event-id data uid] event-id))
+
+(defmethod api-handler :api/get-agents
+  [_ data uid]
+  (for [[module-name agent-name]
+        (select [ALL (collect-one FIRST) LAST :clients MAP-KEYS] (ui/get-object :aor-cache))]
+    {:module-id (url-encode module-name) ; Use standard URL encoding
+     :agent-name (url-encode agent-name)}))
+
+(defmethod api-handler :api/get-invocations
+  [_ {:keys [module-id agent-name pagination]} uid]
+  (let [decoded-module-id (url-decode module-id)
+        decoded-agent-name (url-decode agent-name)
+        pages (if (empty? pagination) nil pagination)]
+    (foreign-invoke-query
+     (:invokes-page-query (objects decoded-module-id decoded-agent-name))
+     10 pages)))
+
+(defmethod api-handler :api/get-graph
+  [_ {:keys [module-id agent-name]} uid]
+  (let [decoded-module-id (url-decode module-id)
+        decoded-agent-name (url-decode agent-name)]
+    {:graph (foreign-invoke-query
+             (:current-graph-query
+              (objects decoded-module-id decoded-agent-name)))}))
+
+(defmethod api-handler :api/run-agent
+  [_ {:keys [module-id agent-name args]} uid]
+  (let [decoded-module-id (url-decode module-id)
+        decoded-agent-name (url-decode agent-name)]
+    (when-not (vector? args)
+      (throw (ex-info "must be a json list of args" {:bad-args args})))
+    (let [^AgentInvoke inv (apply aor/agent-initiate (get-client decoded-module-id decoded-agent-name) args)]
+      {:task-id (.getTaskId inv)
+       :invoke-id (.getAgentInvokeId inv)})))
+
+;; Unified graph page fetcher - replaces separate live/historical flows
+(defmethod api-handler :api/fetch-graph-page
+  [_ {:keys [module-id agent-name invoke-id leaves initial?]} uid]
+  (let [decoded-module-id (url-decode module-id)
+        decoded-agent-name (url-decode agent-name)
+        client-objects (objects decoded-module-id decoded-agent-name)
+        tracing-query (:tracing-query client-objects)
         root-pstate (:root-pstate client-objects)
         history-pstate (:graph-history-pstate client-objects)
-        tracing-query (:tracing-query client-objects)
-        
         [agent-task-id agent-id] (parse-url-pair invoke-id)
-        
-        ;; 1. Fetch the summary info for this invocation
-        ;;    (This is the main new piece of logic)
-        summary-info (foreign-select-one [
-                                          (keypath agent-id)
-                                          (submap [:invoke-args :result :start-time-millis :finish-time-millis :graph-version])]
-                                         root-pstate
-                                         {:pkey agent-task-id})
-        
-        ;; 2. Use graph-version from summary to get historical graph
-        graph-version (:graph-version summary-info)
-        
-        ;; 3. Fetch the corresponding historical graph
-        historical-graph (foreign-select-one [(keypath graph-version)]
-                                             history-pstate
-                                             {:pkey agent-task-id})
-        
-        ;; 4. Fetch the dynamic trace (existing logic)
-        root-invoke-id (foreign-select-one [(keypath agent-id) :root-invoke-id]
+
+        ;; Explicit initial flag from client; fallback to leaves-empty for backward compat
+        is-initial-load? (boolean initial?)
+
+        ;; Get summary info on first request
+        summary-info (when is-initial-load?
+                       (foreign-select-one [(keypath agent-id)
+                                            (submap [:result :start-time-millis :finish-time-millis :graph-version])]
                                            root-pstate
-                                           {:pkey agent-task-id})
+                                           {:pkey agent-task-id}))
 
-        pair (cond
-               (and (string? paginate-task-id) (string? missing-node-id))
-               [(parse-long paginate-task-id) (parse-long missing-node-id)]
-               
-               (and (nil? paginate-task-id) (nil? missing-node-id))
-               [agent-task-id root-invoke-id])]
+        ;; Get historical graph on first request for implicit edge calculation
+        historical-graph (when is-initial-load?
+                           (when-let [graph-version (:graph-version summary-info)]
+                             (foreign-select-one [(keypath graph-version)]
+                                                 history-pstate
+                                                 {:pkey agent-task-id})))
 
-    (when-let [dynamic-trace (when (and pair historical-graph)
-                               (foreign-invoke-query tracing-query agent-task-id [pair] 100))]
-      (let [invokes-map-cleaned (-> (:invokes-map dynamic-trace)
-                                    (remove-implicit-nodes)
-                                    (filter-encodable))
-            
-            ;; 5. Generate implicit edges (existing logic)
-            implicit-edges (generate-implicit-edges invokes-map-cleaned historical-graph)]
-        {:status 200
-         :body {:invokes-map          invokes-map-cleaned
-                :next-task-invoke-pairs (:next-task-invoke-pairs dynamic-trace)
-                :implicit-edges       implicit-edges
-                ;; 6. Add the summary-info to the response payload
-                :summary              (filter-encodable summary-info)}}))))
+        ;; If no leaves, bootstrap from root
+        start-pairs (if is-initial-load?
+                      (let [root-invoke-id (foreign-select-one [(keypath agent-id) :root-invoke-id]
+                                                               root-pstate {:pkey agent-task-id})]
+                        [[agent-task-id root-invoke-id]])
+                      leaves)
 
-(defn fork [{{:keys [module-id agent-name]} :path-params
-             {:keys [changed-nodes invoke-id]} :body-params}]
-  (let [^AgentInvoke result (let [[task-id agent-invoke-id]
-                                  (parse-url-pair invoke-id)]
-                              (aor/agent-initiate-fork
-                               (get-client module-id agent-name)
-                               (aor-types/->AgentInvokeImpl task-id agent-invoke-id)
-                               (transform [MAP-VALS] read-string changed-nodes)))]
-    {:status 200
-     :body
-     {:agent-invoke-id (:agentInvokeId (bean result))
-      :task-id (:taskId (bean result))}}))
+        ;; Use larger page size on first fetch to fast-path historical data
+        page-limit (if is-initial-load? 1000 100)
+        dynamic-trace (when (seq start-pairs)
+                        (foreign-invoke-query tracing-query
+                                              agent-task-id
+                                              start-pairs
+                                              page-limit))
+        cleaned-nodes (when-let [m (:invokes-map dynamic-trace)]
+                        (-> m remove-implicit-nodes))
+        next-leaves (:next-task-invoke-pairs dynamic-trace)
+
+        ;; NEW: Apply UI serialization to make data safe for the UI
+        final-cleaned-nodes (->ui-serializable cleaned-nodes)
+        final-summary (->ui-serializable summary-info)
+        final-historical-graph (->ui-serializable historical-graph)]
+
+    (let [;; Always fetch completion status directly - simple and consistent
+          root-status (foreign-select-one [(keypath agent-id)
+                                           (submap [:result :finish-time-millis])]
+                                          root-pstate
+                                          {:pkey agent-task-id})
+          agent-is-complete? (boolean (or (:finish-time-millis root-status)
+                                          (:result root-status)))
+          ;; Keep legacy variable for logging only; client no longer depends on it
+          has-more-leaves? (and (not agent-is-complete?) (seq next-leaves))]
+      ;; Construct simplified response. Only include keys that are present.
+      (cond-> {:is-complete agent-is-complete?}
+        (seq final-cleaned-nodes) (assoc :nodes final-cleaned-nodes)
+        (seq next-leaves) (assoc :next-leaves next-leaves)
+        is-initial-load? (assoc :summary final-summary
+                                :historical-graph final-historical-graph
+                                :root-invoke-id (when (seq start-pairs) (second (first start-pairs)))
+                                :task-id agent-task-id
+                                :agent-id agent-id)))))
+
+(defmethod api-handler :api/execute-fork
+  [_ {:keys [module-id agent-name invoke-id changed-nodes]} uid]
+  (let [decoded-module-id (url-decode module-id)
+        decoded-agent-name (url-decode agent-name)
+        [task-id agent-invoke-id] (parse-url-pair invoke-id)
+
+        ;; 1. Parse each node's input string from JSON into Clojure data structures.
+        ;; We use string keys to preserve "_aor-type" for multimethod dispatch.
+        json-parsed-nodes (transform [MAP-VALS]
+                                     #(j/read-value %)
+                                     changed-nodes)
+
+        ;; 2. Walk the resulting Clojure data and deserialize the special maps
+        ;;    (with _aor-type) back into their Java object instances.
+        rehydrated-nodes (from-ui-serializable json-parsed-nodes)
+
+        ;; 3. Now pass the correctly-typed data to the agent framework.
+        ^AgentInvoke result (aor/agent-initiate-fork
+                             (get-client decoded-module-id decoded-agent-name)
+                             (aor-types/->AgentInvokeImpl task-id agent-invoke-id)
+                             rehydrated-nodes)]
+    {:agent-invoke-id (:agentInvokeId (bean result))
+     :task-id (:taskId (bean result))}))
+
+(defmethod api-handler :api/provide-human-input
+  [_ {:keys [module-id agent-name request response]} uid]
+  (let [decoded-module-id (url-decode module-id)
+        decoded-agent-name (url-decode agent-name)
+        {:keys [agent-task-id agent-id node node-task-id invoke-id uuid prompt]} request
+        ;; Rebuild a NodeHumanInputRequest record on the server side
+        req (aor-types/->NodeHumanInputRequest
+             agent-task-id agent-id node node-task-id invoke-id prompt uuid)]
+    (aor/provide-human-input (get-client decoded-module-id decoded-agent-name) req response)
+    {:ok true}))
 

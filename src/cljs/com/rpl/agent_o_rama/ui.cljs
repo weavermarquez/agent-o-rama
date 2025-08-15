@@ -6,31 +6,31 @@
    
    [com.rpl.agent-o-rama.ui.agents :as agents]
    ["wouter" :refer [Link Route Switch Router useLocation useRoute]]
-   ["@tanstack/react-query" :refer [QueryClient QueryClientProvider]]
    ["@heroicons/react/24/outline" :refer [HomeIcon CpuChipIcon CircleStackIcon ChevronLeftIcon ChevronRightIcon]]
    
-   [com.rpl.agent-o-rama.ui.datasets :as datasets]
    [com.rpl.agent-o-rama.ui.common :as common]
-   [com.rpl.agent-o-rama.ui.stats :as stats]))
-
-(def query-client (QueryClient.))
+   [com.rpl.agent-o-rama.ui.stats :as stats]
+   [com.rpl.agent-o-rama.ui.sente :as sente]
+   [com.rpl.agent-o-rama.ui.state :as state]
+   [com.rpl.agent-o-rama.ui.events])) ;; Ensure event handlers are registered at app startup
 
 ;; Sidebar navigation component
 (defui sidebar-nav []
   (let [[location _] (useLocation)
-        [collapsed set-collapsed] (common/use-local-storage "sidebar-collapsed" false)
-        toggle-collapsed #(set-collapsed not)]
+        ;; NEW: Use the hook from common.cljs
+        [collapsed? set-collapsed] (common/use-local-storage "sidebar-collapsed?" false)
+        toggle-collapsed #(set-collapsed (not collapsed?))]
     ($ :div {:className (str "h-screen flex flex-col bg-gray-100 transition-all duration-300 "
-                             (if collapsed "w-16" "w-64"))}
+                             (if collapsed? "w-16" "w-64"))}
        ;; Header with toggle button
        ($ :div.flex.items-center.justify-between.p-4.border-b.border-gray-200.overflow-hidden
-          (when-not collapsed
+          (when-not collapsed?
             ($ :h1.text-lg.font-semibold.text-gray-800.truncate.min-w-0 "Agent-O-Rama"))
           ($ :button
              {:onClick toggle-collapsed
               :className "p-2 rounded-md hover:bg-gray-200 transition-colors"
-              :title (if collapsed "Expand sidebar" "Collapse sidebar")}
-             (if collapsed
+              :title (if collapsed? "Expand sidebar" "Collapse sidebar")}
+             (if collapsed?
                ($ ChevronRightIcon {:className "h-5 w-5"})
                ($ ChevronLeftIcon {:className "h-5 w-5"}))))
        
@@ -41,41 +41,41 @@
              ($ Link
                 {:href "/"
                  :className (str "flex items-center px-3 py-2 rounded-md transition-colors "
-                                 (if collapsed "justify-center" "")
+                                 (if collapsed? "justify-center" "")
                                  (if (= location "/")
                                    "bg-gray-300 text-gray-900"
                                    "hover:bg-gray-200 text-gray-700"))
-                 :title (when collapsed "Overview")}
+                 :title (when collapsed? "Overview")}
                 ($ HomeIcon {:className "h-5 w-5 flex-shrink-0"})
-                (when-not collapsed
+                (when-not collapsed?
                   ($ :span.ml-3 "Overview")))
              
              ;; Agents link
              ($ Link
                 {:href "/agents"
                  :className (str "flex items-center px-3 py-2 rounded-md transition-colors "
-                                 (if collapsed "justify-center" "")
+                                 (if collapsed? "justify-center" "")
                                  (if (or (= location "/agents") 
                                          (.startsWith location "/agents/"))
                                    "bg-gray-300 text-gray-900"
                                    "hover:bg-gray-200 text-gray-700"))
-                 :title (when collapsed "Agents")}
+                 :title (when collapsed? "Agents")}
                 ($ CpuChipIcon {:className "h-5 w-5 flex-shrink-0"})
-                (when-not collapsed
+                (when-not collapsed?
                   ($ :span.ml-3 "Agents")))
              
              ;; Datasets link
              ($ Link
                 {:href "/datasets"
                  :className (str "flex items-center px-3 py-2 rounded-md transition-colors "
-                                 (if collapsed "justify-center" "")
+                                 (if collapsed? "justify-center" "")
                                  (if (or (= location "/datasets")
                                          (.startsWith location "/datasets/"))
                                    "bg-gray-300 text-gray-900"
                                    "hover:bg-gray-200 text-gray-700"))
-                 :title (when collapsed "Datasets")}
+                 :title (when collapsed? "Datasets")}
                 ($ CircleStackIcon {:className "h-5 w-5 flex-shrink-0"})
-                (when-not collapsed
+                (when-not collapsed?
                   ($ :span.ml-3 "Datasets"))))))))
 
 ;; Breadcrumb for sub-navigation within sections
@@ -155,10 +155,6 @@
            ($ Route {:path "/agents/:module-id/:agent-name" :component agents/agent})
            ($ Route {:path "/agents" :component agents/index})
            
-           ;; Dataset routes
-           ($ Route {:path "/datasets/:dataset-id" :component datasets/datasets})
-           ($ Route {:path "/datasets" :component datasets/datasets})
-           
            ;; Home route
            ($ Route {:path "/" :component agents/index})))))
 
@@ -166,11 +162,24 @@
 (defui app []
   ($ :div.flex.h-screen.bg-gray-50
      ($ sidebar-nav)
-     ($ main-content)))
+     ($ :div.flex-1.flex.flex-col.min-h-0
+        ($ breadcrumb)
+        ($ :div.flex-1.overflow-auto
+           ($ Router
+              ;; Agent routes
+              ($ Route {:path "/agents/:module-id/:agent-name/invocations" :component agents/invocations})
+              ($ Route {:path "/agents/:module-id/:agent-name/invocations/:invoke-id" :component agents/invoke})
+              ($ Route {:path "/agents/:module-id/:agent-name/evaluations" :component agents/evaluations})
+              ($ Route {:path "/agents/:module-id/:agent-name/stats" :component stats/stats})
+              ($ Route {:path "/agents/:module-id/:agent-name" :component agents/agent})
+              ($ Route {:path "/agents" :component agents/index})
+              
+              ;; Home route
+              ($ Route {:path "/" :component agents/index}))))))
 
 (defn init []
+  (sente/init!)
   (uix.dom/render-root
-   ($ QueryClientProvider {:client query-client}
-      ($ app))
+   ($ app)
    (uix.dom/create-root
     (.getElementById js/document "root"))))
