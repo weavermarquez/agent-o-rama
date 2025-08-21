@@ -31,6 +31,9 @@
 (defmethod -event-msg-handler :default [{:as ev-msg :keys [id ?data]}]
   (.log js/console (str "Unhandled Sente event: " id) ?data))
 
+(defmethod -event-msg-handler :chsk/ws-ping [ev-msg])
+(defmethod -event-msg-handler :chsk/ws-pong [ev-msg])
+
 ;; Handler to log connection state changes
 (defmethod -event-msg-handler :chsk/state [{:as ev-msg :keys [?data]}]
   (let [[old-state new-state] ?data
