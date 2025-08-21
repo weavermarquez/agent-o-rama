@@ -5,6 +5,8 @@
    [clojure.string :as str]
    [com.rpl.rama.ops :as ops])
   (:import
+   [com.github.f4b6a3.uuid
+    UuidCreator]
    [com.rpl.agentorama.impl
     AORExceptionInfo]
    [com.rpl.rama.helpers
@@ -192,9 +194,13 @@
           NONE
           m))
 
+(defn random-uuid7
+  []
+  (UuidCreator/getTimeOrderedEpoch))
+
 (defn random-uuid-str
   []
-  (str (random-uuid)))
+  (str (random-uuid7)))
 
 (defn half-uuid
   [^UUID uuid]
@@ -244,6 +250,9 @@
   (when-not (instance? java.util.List v)
     "value must be a list"))
 
+(defn any-spec
+  [v])
+
 (defn map-spec
   [v]
   (when-not (map? v)
@@ -253,3 +262,9 @@
   [v]
   (when-not (string? v)
     "value must be a string"))
+
+(defn last-key [^java.util.SortedMap m] (.lastKey m))
+
+(defn contains-string?
+  [^String s substring]
+  (.contains s substring))

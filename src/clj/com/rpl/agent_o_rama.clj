@@ -329,7 +329,23 @@
             (throw (h/ex-info e
                               "Module does not host agents"
                               {:module-name module-name}))
-          ))]
+          ))
+
+        datasets-depot        (foreign-depot cluster
+                                             module-name
+                                             (po/datasets-depot-name))
+        datasets-pstate       (foreign-pstate
+                               cluster
+                               module-name
+                               (po/datasets-task-global-name))
+        datasets-page-query   (foreign-query
+                               cluster
+                               module-name
+                               (queries/get-datasets-page-query-name))
+        datasets-search-query (foreign-query
+                               cluster
+                               module-name
+                               (queries/search-datasets-name))]
     (reify
      AgentManager
      (getAgentNames [this]
@@ -355,7 +371,8 @@
              config-pstate        (foreign-pstate
                                    cluster
                                    module-name
-                                   (po/agent-config-task-global-name agentName))
+                                   (po/agent-config-task-global-name
+                                    agentName))
              root-pstate          (foreign-pstate
                                    cluster
                                    module-name
@@ -431,7 +448,6 @@
                (aor-types/->AgentInvokeImpl agent-task-id agent-id)
              )))
 
-
           (nextStep [this agent-invoke]
             (.get (.nextStepAsync this agent-invoke)))
           (nextStepAsync [this agent-invoke]
@@ -501,8 +517,6 @@
                             new-chunks
                             reset?
                             complete?)))))
-
-
           (streamAll [this agent-invoke node]
             (.streamAll this agent-invoke node nil))
           (streamAll [this agent-invoke node stream-all-callback]
@@ -562,6 +576,7 @@
              agent-invoke
              node
              callback-fn))
+          aor-types/UnderlyingObjects
           (underlying-objects [this]
             {:agent-depot          agent-depot
              :agent-config-depot   agent-config-depot
@@ -573,7 +588,125 @@
              :invokes-page-query   invokes-page-query
              :current-graph-query  current-graph-query
             })
-         ))))))
+         )))
+     (createDataset [this name description inputJsonSchema outputJsonSchema]
+       (let [uuid (h/random-uuid7)
+
+             {error aor-types/AGENTS-TOPOLOGY-NAME}
+             (foreign-append!
+              datasets-depot
+              (aor-types/->valid-CreateDataset uuid
+                                               name
+                                               description
+                                               inputJsonSchema
+                                               outputJsonSchema))]
+         (when error
+           (throw (h/ex-info "Error creating dataset" {:info error})))
+         uuid))
+     (setDatasetName [this datasetId name]
+       (foreign-append!
+        datasets-depot
+        (aor-types/->valid-UpdateDatasetProperty datasetId :name name)))
+     (setDatasetDescription [this datasetId description]
+       (foreign-append!
+        datasets-depot
+        (aor-types/->valid-UpdateDatasetProperty datasetId
+                                                 :description
+                                                 description)))
+     (destroyDataset [this datasetId]
+       (foreign-append!
+        datasets-depot
+        (aor-types/->valid-DestroyDataset datasetId)))
+     (addDatasetExampleAsync
+       [this datasetId snapshotName input referenceOutput tags]
+       (let [uuid (h/random-uuid7)]
+         (-> (foreign-append-async!
+              datasets-depot
+              (aor-types/->valid-AddDatasetExample
+               datasetId
+               snapshotName
+               uuid
+               input
+               referenceOutput
+               (into #{} tags)))
+             (.thenApply
+              (h/cf-function [{error aor-types/AGENTS-TOPOLOGY-NAME}]
+                (when error
+                  (throw (h/ex-info "Error adding example" {:info error})))
+                uuid
+              )))))
+     (addDatasetExample [this datasetId snapshotName input referenceOutput tags]
+       (.get (.addDatasetExampleAsync this
+                                      datasetId
+                                      snapshotName
+                                      input
+                                      referenceOutput
+                                      tags)))
+     (setDatasetExampleInput [this datasetId snapshotName exampleId input]
+       (let [{error aor-types/AGENTS-TOPOLOGY-NAME}
+             (foreign-append!
+              datasets-depot
+              (aor-types/->valid-UpdateDatasetExample datasetId
+                                                      snapshotName
+                                                      exampleId
+                                                      :input
+                                                      input))]
+         (when error
+           (throw (h/ex-info "Error updating example" {:info error})))
+       ))
+     (setDatasetExampleReferenceOutput
+       [this datasetId snapshotName exampleId referenceOutput]
+       (let [{error aor-types/AGENTS-TOPOLOGY-NAME}
+             (foreign-append!
+              datasets-depot
+              (aor-types/->valid-UpdateDatasetExample datasetId
+                                                      snapshotName
+                                                      exampleId
+                                                      :reference-output
+                                                      referenceOutput))]
+         (when error
+           (throw (h/ex-info "Error updating example" {:info error})))
+       ))
+     (removeDatasetExample [this datasetId snapshotName exampleId]
+       (foreign-append!
+        datasets-depot
+        (aor-types/->valid-RemoveDatasetExample datasetId
+                                                snapshotName
+                                                exampleId)))
+     (addDatasetExampleTag [this datasetId snapshotName exampleId tag]
+       (foreign-append!
+        datasets-depot
+        (aor-types/->valid-AddDatasetExampleTag datasetId
+                                                snapshotName
+                                                exampleId
+                                                tag)))
+     (removeDatasetExampleTag [this datasetId snapshotName exampleId tag]
+       (foreign-append!
+        datasets-depot
+        (aor-types/->valid-RemoveDatasetExampleTag datasetId
+                                                   snapshotName
+                                                   exampleId
+                                                   tag)))
+     (snapshotDataset [this datasetId fromSnapshotName toSnapshotName]
+       (foreign-append!
+        datasets-depot
+        (aor-types/->valid-DatasetSnapshot datasetId
+                                           fromSnapshotName
+                                           toSnapshotName)))
+     (removeDatasetSnapshot [this datasetId snapshotName]
+       (foreign-append!
+        datasets-depot
+        (aor-types/->valid-RemoveDatasetSnapshot datasetId
+                                                 snapshotName)))
+     (searchDatasets [this searchString limit]
+       (foreign-invoke-query datasets-search-query searchString limit))
+     (close [this]
+       (close! datasets-depot))
+     aor-types/UnderlyingObjects
+     (underlying-objects [this]
+       {:datasets-pstate     datasets-pstate
+        :datasets-page-query datasets-page-query
+       }))))
 
 (defn agent-client
   ^AgentClient [^IFetchAgentClient agent-client-fetcher agent-name]
@@ -691,6 +824,142 @@
   ^CompletableFuture
   [^AgentClient client request response]
   (.provideHumanInputAsync client request response))
+
+
+(defn create-dataset!
+  ([manager name] (create-dataset! manager name nil))
+  ([^AgentManager manager name options]
+   ;; types are validated by Java API
+   (h/validate-options! name
+                        options
+                        {:description        h/any-spec
+                         :input-json-schema  h/any-spec
+                         :output-json-schema h/any-spec})
+   (.createDataset manager
+                   name
+                   (:description options)
+                   (:input-json-schema options)
+                   (:output-json-schema options))))
+
+(defn set-dataset-name!
+  [^AgentManager manager dataset-id name]
+  (.setDatasetName manager dataset-id name))
+
+(defn set-dataset-description!
+  [^AgentManager manager dataset-id description]
+  (.setDatasetDescription manager dataset-id description))
+
+(defn destroy-dataset!
+  [^AgentManager manager dataset-id]
+  (.destroyDataset manager dataset-id))
+
+(defn add-dataset-example-async!
+  (^CompletableFuture [manager dataset-id input]
+   (add-dataset-example-async! manager dataset-id input nil))
+  (^CompletableFuture [^AgentManager manager dataset-id input options]
+   ;; types are validated by Java API
+   (h/validate-options! name
+                        options
+                        {:snapshot h/any-spec
+                         :reference-output h/any-spec
+                         :tags     h/any-spec})
+   (.addDatasetExampleAsync manager
+                            dataset-id
+                            (:snapshot options)
+                            input
+                            (:reference-output options)
+                            (:tags options))))
+
+(defn add-dataset-example!
+  ([manager dataset-id input]
+   (.get (add-dataset-example-async! manager dataset-id input)))
+  ([^AgentManager manager dataset-id input options]
+   (.get (add-dataset-example-async! manager dataset-id input options))))
+
+(defn set-dataset-example-input!
+  ([manager dataset-id example-id input]
+   (set-dataset-example-input! manager dataset-id example-id input nil))
+  ([^AgentManager manager dataset-id example-id input options]
+   ;; types are validated by Java API
+   (h/validate-options! name
+                        options
+                        {:snapshot h/any-spec})
+   (.setDatasetExampleInput manager
+                            dataset-id
+                            (:snapshot options)
+                            example-id
+                            input)))
+
+(defn set-dataset-example-reference-output!
+  ([manager dataset-id example-id reference-output]
+   (set-dataset-example-reference-output! manager
+                                          dataset-id
+                                          example-id
+                                          reference-output
+                                          nil))
+  ([^AgentManager manager dataset-id example-id reference-output options]
+   ;; types are validated by Java API
+   (h/validate-options! name
+                        options
+                        {:snapshot h/any-spec})
+   (.setDatasetExampleReferenceOutput manager
+                                      dataset-id
+                                      (:snapshot options)
+                                      example-id
+                                      reference-output)))
+
+(defn remove-dataset-example!
+  ([manager dataset-id example-id]
+   (remove-dataset-example! manager dataset-id example-id nil))
+  ([^AgentManager manager dataset-id example-id options]
+   ;; types are validated by Java API
+   (h/validate-options! name
+                        options
+                        {:snapshot h/any-spec})
+   (.removeDatasetExample manager
+                          dataset-id
+                          (:snapshot options)
+                          example-id)))
+
+(defn add-dataset-example-tag!
+  ([manager dataset-id example-id tag]
+   (add-dataset-example-tag! manager dataset-id example-id tag nil))
+  ([^AgentManager manager dataset-id example-id tag options]
+   ;; types are validated by Java API
+   (h/validate-options! name
+                        options
+                        {:snapshot h/any-spec})
+   (.addDatasetExampleTag manager
+                          dataset-id
+                          (:snapshot options)
+                          example-id
+                          tag)))
+
+(defn remove-dataset-example-tag!
+  ([manager dataset-id example-id tag]
+   (remove-dataset-example-tag! manager dataset-id example-id tag nil))
+  ([^AgentManager manager dataset-id example-id tag options]
+   ;; types are validated by Java API
+   (h/validate-options! name
+                        options
+                        {:snapshot h/any-spec})
+   (.removeDatasetExampleTag manager
+                             dataset-id
+                             (:snapshot options)
+                             example-id
+                             tag)))
+
+(defn snapshot-dataset!
+  [^AgentManager manager dataset-id from-snapshot to-snapshot]
+  (.snapshotDataset manager dataset-id from-snapshot to-snapshot))
+
+(defn remove-dataset-snapshot!
+  [^AgentManager manager dataset-id snapshot-name]
+  (.removeDatasetSnapshot manager dataset-id snapshot-name))
+
+(defn search-datasets
+  [^AgentManager manager search-string limit]
+  (.searchDatasets manager search-string limit))
 
 (defn start-ui
   (^AutoCloseable [ipc] (start-ui ipc nil))

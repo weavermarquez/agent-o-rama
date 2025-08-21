@@ -241,14 +241,83 @@
   ToolInfo
   (getToolSpecification [this] tool-specification))
 
+
+;; Datasets
+
+(drp/defrecord+ CreateDataset
+  [dataset-id :- UUID
+   name :- String
+   description :- (s/maybe String)
+   input-json-schema :- (s/maybe String)
+   output-json-schema :- (s/maybe String)
+  ])
+
+(drp/defrecord+ UpdateDatasetProperty
+  [dataset-id :- UUID
+   key :- clojure.lang.Keyword
+   value :- Object])
+
+(drp/defrecord+ DestroyDataset
+  [dataset-id :- UUID])
+
+(drp/defrecord+ AddDatasetExample
+  [dataset-id :- UUID
+   snapshot-name :- (s/maybe String)
+   example-id :- UUID
+   input :- Object
+   reference-output :- (s/maybe Object)
+   tags :- (s/maybe #{String})
+  ])
+
+(drp/defrecord+ UpdateDatasetExample
+  [dataset-id :- UUID
+   snapshot-name :- (s/maybe String)
+   example-id :- UUID
+   key :- clojure.lang.Keyword
+   value :- Object])
+
+(drp/defrecord+ RemoveDatasetExample
+  [dataset-id :- UUID
+   snapshot-name :- (s/maybe String)
+   example-id :- UUID])
+
+(drp/defrecord+ AddDatasetExampleTag
+  [dataset-id :- UUID
+   snapshot-name :- (s/maybe String)
+   example-id :- UUID
+   tag :- String])
+
+(drp/defrecord+ RemoveDatasetExampleTag
+  [dataset-id :- UUID
+   snapshot-name :- (s/maybe String)
+   example-id :- UUID
+   tag :- String])
+
+(drp/defrecord+ DatasetSnapshot
+  [dataset-id :- UUID
+   from-snapshot-name :- (s/maybe String)
+   to-snapshot-name :- String])
+
+(drp/defrecord+ RemoveDatasetSnapshot
+  [dataset-id :- UUID
+   snapshot-name :- String])
+
+
+;; Internal protocols
+
+(defprotocol UnderlyingObjects
+  (underlying-objects [this]))
+
 (defprotocol AgentsTopologyInternal
   (declare-agent-object-builder-internal [this name afn options]))
 
 (defprotocol AgentClientInternal
   (stream-internal [this agent-invoke node callback-fn])
   (stream-specific-internal [this agent-invoke node node-invoke-id callback-fn])
-  (stream-all-internal [this agent-invoke node callback-fn])
-  (underlying-objects [this]))
+  (stream-all-internal [this agent-invoke node callback-fn]))
+
+
+;; Configs
 
 (drp/defrecord+ ChangeConfig
   [key :- String
