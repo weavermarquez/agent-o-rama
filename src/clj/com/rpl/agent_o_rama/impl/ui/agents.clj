@@ -30,17 +30,6 @@
 (defn objects [module-id agent-name]
   (aor-types/underlying-objects (get-client module-id agent-name)))
 
-(defn manually-trigger-invoke [{{:keys [module-id agent-name]} :path-params
-                                {:keys [args]} :body-params
-                                :as req}]
-  (when-not (vector? args)
-    (throw (ex-info "must be a json list of args" {:bad-args args})))
-  (let [^AgentInvoke inv (apply aor/agent-initiate (get-client module-id agent-name) args)]
-    {:status 200
-     :body
-     {:task-id (.getTaskId inv)
-      :invoke-id (.getAgentInvokeId inv)}}))
-
 (defn remove-implicit-nodes
   "Preprocesses the invokes-map to remove implicit nodes and rewire edges to real nodes.
    Returns a new map without implicit nodes where all references are updated."
@@ -163,13 +152,24 @@
         ;; Explicit initial flag from client; fallback to leaves-empty for backward compat
         is-initial-load? (boolean initial?)
 
-        ;; Get summary info on first request
-        summary-info (when is-initial-load?
-                       (foreign-select-one [(keypath agent-id)
-                                            (submap [:result :start-time-millis :finish-time-millis :graph-version])]
-                                           root-pstate
-                                           {:pkey agent-task-id}))
+        ;; ALWAYS get summary info on EVERY request now
+        summary-info (merge
+                      {:forks (foreign-select-one [(keypath agent-id)
+                                                   :forks
+                                                   (sorted-set-range-to-end 100)]
+                                                  root-pstate
+                                                  {:pkey agent-task-id})}
+                      (foreign-select-one [(keypath agent-id)
+                                           (submap [:result :start-time-millis :finish-time-millis :graph-version :retry-num
+                                                    :fork-of :exception-summaries])]
+                                          root-pstate
+                                          {:pkey agent-task-id}))
 
+        ;; Only fetch root-invoke-id on the initial load
+        root-invoke-id (when is-initial-load? 
+                         (foreign-select-one [(keypath agent-id) :root-invoke-id] 
+                                             root-pstate {:pkey agent-task-id}))
+        
         ;; Get historical graph on first request for implicit edge calculation
         historical-graph (when is-initial-load?
                            (when-let [graph-version (:graph-version summary-info)]
@@ -177,12 +177,9 @@
                                                  history-pstate
                                                  {:pkey agent-task-id})))
 
-        ;; If no leaves, bootstrap from root
         start-pairs (if is-initial-load?
-                      (let [root-invoke-id (foreign-select-one [(keypath agent-id) :root-invoke-id]
-                                                               root-pstate {:pkey agent-task-id})]
-                        [[agent-task-id root-invoke-id]])
-                      leaves)
+                      [[agent-task-id root-invoke-id]] ; bootstrap from the fetched root
+                      leaves)           ; use client-provided leaves
 
         ;; Use larger page size on first fetch to fast-path historical data
         page-limit (if is-initial-load? 1000 100)
@@ -194,30 +191,27 @@
         cleaned-nodes (when-let [m (:invokes-map dynamic-trace)]
                         (-> m remove-implicit-nodes))
         next-leaves (:next-task-invoke-pairs dynamic-trace)
+        ;; Always fetch completion status directly - simple and consistent
+        root-status (foreign-select-one [(keypath agent-id)
+                                         (submap [:result :finish-time-millis])]
+                                        root-pstate
+                                        {:pkey agent-task-id})
+        agent-is-complete? (boolean (or (:finish-time-millis root-status)
+                                        (:result root-status)))
+        ;; Keep legacy variable for logging only; client no longer depends on it
+        has-more-leaves? (and (not agent-is-complete?) (seq next-leaves))]
 
-        ;; NEW: Apply UI serialization to make data safe for the UI
-        final-cleaned-nodes (->ui-serializable cleaned-nodes)
-        final-summary (->ui-serializable summary-info)
-        final-historical-graph (->ui-serializable historical-graph)]
-
-    (let [;; Always fetch completion status directly - simple and consistent
-          root-status (foreign-select-one [(keypath agent-id)
-                                           (submap [:result :finish-time-millis])]
-                                          root-pstate
-                                          {:pkey agent-task-id})
-          agent-is-complete? (boolean (or (:finish-time-millis root-status)
-                                          (:result root-status)))
-          ;; Keep legacy variable for logging only; client no longer depends on it
-          has-more-leaves? (and (not agent-is-complete?) (seq next-leaves))]
-      ;; Construct simplified response. Only include keys that are present.
-      (cond-> {:is-complete agent-is-complete?}
-        (seq final-cleaned-nodes) (assoc :nodes final-cleaned-nodes)
-        (seq next-leaves) (assoc :next-leaves next-leaves)
-        is-initial-load? (assoc :summary final-summary
-                                :historical-graph final-historical-graph
-                                :root-invoke-id (when (seq start-pairs) (second (first start-pairs)))
-                                :task-id agent-task-id
-                                :agent-id agent-id)))))
+    ;; Construct simplified response. Only include keys that are present.
+    ;; Serialization now handled centrally in Sente handler
+    (cond-> {:is-complete agent-is-complete?}
+      (seq cleaned-nodes) (assoc :nodes cleaned-nodes)
+      (seq next-leaves) (assoc :next-leaves next-leaves)
+      true (assoc :summary summary-info
+                  :task-id agent-task-id
+                  :agent-id agent-id)
+      ;; Conditionally add :root-invoke-id and :historical-graph only on the first load
+      is-initial-load? (assoc :root-invoke-id root-invoke-id
+                              :historical-graph historical-graph))))
 
 (defmethod api-handler :api/execute-fork
   [_ {:keys [module-id agent-name invoke-id changed-nodes]} uid]

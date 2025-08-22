@@ -9,11 +9,14 @@
 
    [com.rpl.specter :as s]
    [com.rpl.agent-o-rama.ui.state :as state]
+   [com.rpl.agent-o-rama.ui.common :as common]
 
    ["react" :refer [useState useCallback useEffect]]
    ["react-dom" :refer [createPortal]]
    ["@xyflow/react" :refer [ReactFlow Background Controls useNodesState useEdgesState Handle MiniMap]]
-   ["@dagrejs/dagre" :as Dagre]))
+   ["@dagrejs/dagre" :as Dagre]
+   ["@heroicons/react/24/outline" :refer [ExclamationTriangleIcon ArrowPathIcon ArrowTopRightOnSquareIcon]]
+   ["wouter" :as wouter]))
 
 (defn format-ms [ms]
   (let [date (js/Date. ms)
@@ -26,7 +29,7 @@
                         :minute "2-digit"
                         :second "2-digit"
                         :hour12 false})
-        base (.format formatter date)
+        base (str/replace (.format formatter date) "," "")
         millis (.padStart (str (.getMilliseconds date)) 3 "0")]
     (str base "." millis)))
 
@@ -36,31 +39,94 @@
 (defn agg-node? [node]
   (not (nil? (:agg-state node))))
 
-(defui expandable-popup-modal [{:keys [content content-index title on-close]}]
-  (createPortal
-   ($ :div {:className "fixed inset-0 flex items-center justify-center z-50"
-            :style {:backgroundColor "rgba(0, 0, 0, 0.5)"}
-            :onClick (fn [e]
-                       (.preventDefault e)
-                       (.stopPropagation e)
-                       (on-close))}
-      ($ :div {:className "bg-white rounded-lg shadow-xl max-w-4xl max-h-[80vh] overflow-hidden"
-               :onClick (fn [e]
-                          (.preventDefault e)
-                          (.stopPropagation e))}
-         ($ :div {:className "p-4 border-b border-gray-200 flex justify-between items-center"}
-            ($ :h3 {:className "text-lg font-medium text-gray-800"}
-               title)
-            ($ :button {:className "text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer"
-                        :onClick (fn [e]
-                                   (.preventDefault e)
-                                   (.stopPropagation e)
-                                   (on-close))}
-               "×"))
-         ($ :div {:className "p-4 overflow-auto max-h-96"}
-            ($ :pre {:className "text-sm font-mono text-gray-800 whitespace-pre-wrap break-all"}
-               content))))
-   (.-body js/document)))
+(defui node-status-bar
+  "Renders a horizontal status bar showing all active node states.
+   Props:
+   - :in-progress? - Node is currently processing
+   - :is-stuck? - Node terminated due to max retries
+   - :has-changes - Node has been modified for forking
+   - :has-human-request - Node is waiting for human input
+   - :has-exceptions - Node has exceptions
+   - :has-result - Node completed successfully"
+  [{:keys [in-progress? is-stuck? has-changes has-human-request has-exceptions has-result]}]
+  (let [;; Collect all active status indicators
+        indicators (cond-> []
+                     ;; In-progress or stuck
+                     (and in-progress? (not is-stuck?))
+                     (conj {:type :spinner
+                            :title "Processing..."})
+
+                     is-stuck?
+                     (conj {:type :stuck
+                            :title "Node terminated due to max retries"})
+
+                     ;; Has changes (forking mode)
+                     has-changes
+                     (conj {:type :changed
+                            :title "Modified for fork"})
+
+                     ;; Human request
+                     has-human-request
+                     (conj {:type :human
+                            :title "Awaiting human input"})
+
+                     ;; Exceptions (only if not stuck)
+                     (and has-exceptions (not is-stuck?))
+                     (conj {:type :exception
+                            :title "Has exceptions"})
+
+                     ;; Successful result
+                     has-result
+                     (conj {:type :success
+                            :title "Completed successfully"}))]
+
+    ;; Render the status bar if there are any indicators
+    (when (seq indicators)
+      ($ :div {:className "absolute -top-1 -right-1 flex items-center gap-0.5 rounded-full px-0.5 py-0.5 bg-white border border-gray-200"}
+         (for [{:keys [type title]} indicators]
+           ($ :div {:key type
+                    :className "w-3 h-3 flex items-center justify-center"
+                    :title title}
+              (case type
+                :spinner ($ common/spinner {:size :small})
+                :stuck ($ :div {:className "w-3 h-3 bg-red-500 rounded-full flex items-center justify-center"}
+                          ($ :svg {:className "w-2 h-2 text-white" :fill "none" :viewBox "0 0 24 24" :stroke "currentColor"}
+                             ($ :path {:strokeLinecap "round" :strokeLinejoin "round" :strokeWidth 3 :d "M6 18L18 6M6 6l12 12"})))
+                :changed ($ :div {:className "w-3 h-3 bg-orange-400 rounded-full"})
+                :human ($ :div {:className "w-3 h-3 flex items-center justify-center text-xs"} "🙋")
+                :exception ($ :div {:className "w-3 h-3 bg-yellow-500 rounded-full flex items-center justify-center"}
+                              ($ ExclamationTriangleIcon {:className "w-2 h-2 text-white"}))
+                :success ($ :div {:className "w-3 h-3 bg-green-500 rounded-full"})
+                nil)))))))
+
+(defui global-modal-component []
+  (let [modal-state (state/use-sub [:ui :modal])
+        {:keys [active data]} modal-state]
+    (when active
+      (createPortal
+       ($ :div {:className "fixed inset-0 flex items-center justify-center z-50"
+                :style {:backgroundColor "rgba(0, 0, 0, 0.5)"}
+                :onClick (fn [e]
+                           (.preventDefault e)
+                           (.stopPropagation e)
+                           (state/dispatch [:modal/hide]))}
+          ($ :div {:className "bg-white rounded-lg shadow-xl max-w-4xl max-h-[80vh] overflow-hidden"
+                   :onClick (fn [e]
+                              (.preventDefault e)
+                              (.stopPropagation e))}
+             ($ :div {:className "p-4 border-b border-gray-200 flex justify-between items-center"}
+                ($ :h3 {:className "text-lg font-medium text-gray-800"}
+                   (:title data))
+                ($ :button {:className "text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer"
+                            :onClick (fn [e]
+                                       (.preventDefault e)
+                                       (.stopPropagation e)
+                                       (state/dispatch [:modal/hide]))}
+                   "×"))
+             ($ :div {:className "p-4 overflow-auto max-h-96"}
+                ($ :pre {:className "text-sm font-mono text-gray-800 whitespace-pre-wrap break-all"}
+                   (:content data)))))
+       (.-body js/document)))))
 
 (defn pretty-format [item]
   "Format data structure with proper indentation and formatting using pprint"
@@ -70,38 +136,33 @@
 
 (defui expandable-item-component [{:keys [item color title truncate-length]
                                    :or {truncate-length 50}}]
-  (let [[show-modal set-show-modal] (uix/use-state false)
-        item-str (if (string? item) item (pr-str item))
+  (let [item-str (if (string? item) item (pr-str item))
         pretty-str (pretty-format item)
         is-long? (> (count item-str) truncate-length)
         truncated-str (if is-long?
                         (str (subs item-str 0 (- truncate-length 3)) "...")
                         item-str)]
-    ($ :<>
-       ($ :div {:className (str "text-" color "-500")}
-          ($ :span {:className (str "break-words cursor-pointer hover:bg-" color "-100 px-1 py-0.5 rounded")
-                    :onClick (fn [e]
-                               (.stopPropagation e)
-                               (set-show-modal true))
-                    :title "Click to expand"}
-             truncated-str))
-
-       ;; Popup modal with pretty formatting
-       (when show-modal
-         ($ expandable-popup-modal {:content pretty-str
-                                    :title title
-                                    :on-close #(set-show-modal false)})))))
+    ($ :div {:className (str "text-" color "-500")}
+       ($ :span {:className (str "break-words cursor-pointer hover:bg-" color "-100 px-1 py-0.5 rounded")
+                 :onClick (fn [e]
+                            (.stopPropagation e)
+                            (state/dispatch [:modal/show :expandable-content
+                                             {:title title
+                                              :content pretty-str}]))
+                 :title "Click to expand"}
+          truncated-str))))
 
 ;; Declare generic-data-viewer first to avoid circular dependency
 (declare generic-data-viewer)
 
 (defui expandable-list-component [{:keys [items color title-singular truncate-length depth]
                                    :or {truncate-length 50 depth 0}}]
-  ($ :div {:className (str "text-" color "-500 mt-1 space-y-1")}
+  ($ :div {:className (str "text-" color "-500 space-y-1 rounded-sm")
+           :style {:background-color "rgba(0, 0, 0, 0.02)"}}
      (for [[idx item] (map-indexed vector items)]
        ($ :div {:key idx
                 :className "flex items-start gap-2"}
-          ($ :span {:className (str "text-" color "-400 text-xs flex-shrink-0 mt-0.5")}
+          ($ :span {:className (str "text-" color "-400 text-xs flex-shrink-0")}
              (str (inc idx) "."))
           ;; Recursively render each item using the generic viewer
           ($ :div {:className "flex-1"}
@@ -118,6 +179,12 @@
       ;; Handle nil explicitly
       (nil? data)
       ($ :span {:className (str "text-" color "-500 italic")} "nil")
+
+      ;; Handle empty values (string, map, list, etc.)
+      (or (and (string? data) (empty? data))
+          (and (map? data) (empty? data))
+          (and (sequential? data) (empty? data)))
+      ($ :span {:className "text-gray-400 italic text-xs"} "(empty)")
 
       ;; If we've hit max depth, fall back to expandable components
       (>= depth max-depth)
@@ -140,7 +207,8 @@
 
       ;; Case 1: The data is a map. Render its key-value pairs.
       (map? data)
-      ($ :div {:className "mt-1 space-y-1 pl-2 border-l border-gray-200"}
+      ($ :div {:className "mt-1 space-y-1 pl-2 border-l border-gray-200 rounded-sm"
+               :style {:background-color "rgba(0, 0, 0, 0.02)"}}
          (for [[k v] (sort-by key data)]
            ($ :div {:key (str k)}
               ($ :div {:className "flex items-start gap-1"}
@@ -173,55 +241,58 @@
         node-id (:node-id data)
         node-name (:node data)
         input (:input data)
+        exceptions (:exceptions data)
         result (:result data)
         start-time (:start-time-millis data)
         finish-time (:finish-time-millis data)
         duration (when (and start-time finish-time)
                    (str (- finish-time start-time)))
         emits (:emits data)
-        has-paginated (:has-paginated-children data)]
+        has-paginated (:has-paginated-children data)
+
+        hr (:human-request data)
+
+        hr-invoke-id (when hr (:invoke-id hr))
+        hitl-response (state/use-sub (if hr-invoke-id
+                                       [:ui :hitl :responses (s/keypath hr-invoke-id)]
+                                       [:ui :hitl :responses :placeholder]))
+        submitting? (state/use-sub (if hr-invoke-id
+                                     [:ui :hitl :submitting (s/keypath hr-invoke-id)]
+                                     [:ui :hitl :submitting :placeholder]))]
 
     (when selected-node
       ($ :div {:className "mt-6 bg-white shadow-lg rounded-lg border border-gray-200 max-w-4xl"}
          ($ :div {:className "p-6"}
             ;; Human input section
-            (let [hr (:human-request data)
-                  hr-invoke-id (when hr (:invoke-id hr))
-                  hitl-response (state/use-sub (if hr-invoke-id
-                                                 [:ui :hitl :responses (s/keypath hr-invoke-id)]
-                                                 [:ui :hitl :responses :placeholder]))
-                  submitting? (state/use-sub (if hr-invoke-id
-                                               [:ui :hitl :submitting (s/keypath hr-invoke-id)]
-                                               [:ui :hitl :submitting :placeholder]))]
-              (when hr
-                ($ :div {:className "bg-amber-50 p-3 rounded-md mt-4 border border-amber-200"}
-                   ($ :div {:className "text-sm font-medium text-amber-800 mb-2"} "Human input required")
-                   ($ :div {:className "text-sm text-amber-700 mb-3 whitespace-pre-wrap"} (:prompt hr))
-                   ($ :div
-                      ($ :textarea {:className "w-full border rounded p-2 text-sm resize-y"
-                                    :rows 3
-                                    :placeholder "Type your response..."
-                                    :value (or hitl-response "")
-                                    :disabled submitting?
-                                    :onChange #(state/dispatch [:db/set-value
-                                                                [:ui :hitl :responses (s/keypath hr-invoke-id)]
-                                                                (.. % -target -value)])})
-                      ($ :button {:className (str "mt-2 px-3 py-2 rounded text-sm font-medium transition-colors "
-                                                  (if submitting?
-                                                    "bg-gray-400 text-gray-600 cursor-not-allowed"
-                                                    "bg-blue-600 hover:bg-blue-700 text-white"))
-                                  :disabled (or submitting? (empty? (str/trim (or hitl-response ""))))
-                                  :onClick #(when (and (not submitting?)
-                                                       (not (empty? (str/trim (or hitl-response "")))))
-                                              (state/dispatch [:hitl/submit
-                                                               {:module-id module-id
-                                                                :agent-name agent-name
-                                                                :invoke-id invoke-id
-                                                                :request hr
-                                                                :response (str/trim hitl-response)}])
-                                              ;; Clear the response after submission
-                                              (state/dispatch [:db/set-value [:ui :hitl :responses (s/keypath hr-invoke-id)] ""]))}
-                         (if submitting? "Submitting..." "Submit Response"))))))
+            (when hr
+              ($ :div {:className "bg-amber-50 p-3 rounded-md mt-4 border border-amber-200"}
+                 ($ :div {:className "text-sm font-medium text-amber-800 mb-2"} "Human input required")
+                 ($ :div {:className "text-sm text-amber-700 mb-3 whitespace-pre-wrap"} (:prompt hr))
+                 ($ :div
+                    ($ :textarea {:className "w-full border rounded p-2 text-sm resize-y"
+                                  :rows 3
+                                  :placeholder "Type your response..."
+                                  :value (or hitl-response "")
+                                  :disabled submitting?
+                                  :onChange #(state/dispatch [:db/set-value
+                                                              [:ui :hitl :responses (s/keypath hr-invoke-id)]
+                                                              (.. % -target -value)])})
+                    ($ :button {:className (str "mt-2 px-3 py-2 rounded text-sm font-medium transition-colors "
+                                                (if submitting?
+                                                  "bg-gray-400 text-gray-600 cursor-not-allowed"
+                                                  "bg-blue-600 hover:bg-blue-700 text-white"))
+                                :disabled (or submitting? (empty? (str/trim (or hitl-response ""))))
+                                :onClick #(when (and (not submitting?)
+                                                     (not (empty? (str/trim (or hitl-response "")))))
+                                            (state/dispatch [:hitl/submit
+                                                             {:module-id module-id
+                                                              :agent-name agent-name
+                                                              :invoke-id invoke-id
+                                                              :request hr
+                                                              :response (str/trim hitl-response)}])
+                                            ;; Clear the response after submission
+                                            (state/dispatch [:db/set-value [:ui :hitl :responses (s/keypath hr-invoke-id)] ""]))}
+                       (if submitting? "Submitting..." "Submit Response")))))
 
             ($ :div {:className "bg-indigo-50 p-3 rounded-md mt-4"}
                ($ :div {:className "flex justify-between items-center"}
@@ -238,6 +309,25 @@
                                          :color "blue"
                                          :truncate-length 100
                                          :depth 0})))
+
+            (when (seq exceptions)
+              ($ :div {:className "bg-red-50 p-3 rounded-md mt-4 border border-red-200"}
+                 ($ :div {:className "text-sm font-medium text-red-700 mb-2 flex items-center gap-2"}
+                    ($ ExclamationTriangleIcon {:className "w-5 h-5"})
+                    (str "Exceptions (" (count exceptions) ")"))
+                 ($ :div {:className "space-y-2"}
+                    (for [[idx exc-str] (map-indexed vector exceptions)]
+                      (let [first-line (first (str/split-lines exc-str))]
+                        ($ :div {:key idx
+                                 :className "bg-white p-2 rounded border border-red-100 cursor-pointer hover:bg-red-50 transition-colors"
+                                 :onClick (fn [e]
+                                            (.stopPropagation e)
+                                            (state/dispatch [:modal/show :exception-detail
+                                                             {:title (str "Exception " (inc idx))
+                                                              :content exc-str}]))
+                                 :title "Click to view full exception"}
+                           ($ :div {:className "text-xs font-mono text-red-800"}
+                              first-line)))))))
             (when (and start-time finish-time)
               ($ :div {:className "bg-yellow-50 p-3 rounded-md mt-4"}
                  ($ :div {:className "text-sm font-medium text-yellow-700 mb-2"} "Timing")
@@ -290,52 +380,72 @@
                                       ($ :span {:className "text-sm font-mono text-sky-700"}
                                          (:objectName info)))))
                               ;; Always display the duration
-                              (when duration
-                                ($ :div {:className "text-xs text-sky-500 font-mono"
-                                         :title (str "Started: " (format-ms start-time) "\nFinished: " (format-ms finish-time))}
-                                   (str duration "ms"))))
+                              ($ :div {:className "flex items-center gap-2"}
+                                 ;; Always display the duration
+                                 (when duration
+                                   ($ :div {:className "text-xs text-sky-500 font-mono"
+                                            :title (str "Started: " (format-ms start-time) "\nFinished: " (format-ms finish-time))}
+                                      (str duration "ms")))
+                                 ;; Add navigation button for agent-call operations
+                                 (when (= (keyword op-type) :agent-call)
+                                   (let [invoke-data (if (= (str (:op info)) "initiate")
+                                                       (:result info)
+                                                       (:agent-invoke info))
+                                         task-id (:task-id invoke-data)
+                                         agent-invoke-id (:agent-invoke-id invoke-data)
+                                         module-id (:agent-module-name info)
+                                         agent-name (:agent-name info)
+                                         can-navigate? (and (not (nil? task-id)) (not (nil? agent-invoke-id)) module-id agent-name)
+                                         target-url (when can-navigate?
+                                                      (str "/agents/" (common/url-encode module-id)
+                                                           "/" (common/url-encode agent-name)
+                                                           "/invocations/" task-id "-" agent-invoke-id))]
+                                     (when target-url
+                                       ($ :button {:onClick (fn [] (js/window.open target-url "_blank"))
+                                                   :className "inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-white bg-indigo-600 rounded hover:bg-indigo-700 transition-colors cursor-pointer shadow-sm"}
+                                          "View"
+                                          ($ ArrowTopRightOnSquareIcon {:className "h-3 w-3"})))))))
 
                            ;; 2. The Body: Replace all specific logic with the generic viewer
                            ($ :div {:className "text-xs text-sky-600 mt-1"}
-                              ($ generic-data-viewer {:data info :color "sky" :depth 0})))))))))
+                              ($ generic-data-viewer {:data info :color "sky" :depth 0}))))))))
 
-               ;; Emits Section (full width)
-         (when (and emits (> (count emits) 0))
-           ($ :div {:className "mt-4 bg-purple-50 p-3 rounded-md"}
-              ($ :div {:className "text-sm font-medium text-purple-700 mb-2"}
-                 (str "Emits (" (count emits) ")"))
-              ($ :div {:className "space-y-2"}
-                 (for [[idx emit] (map-indexed vector (js->clj emits :keywordize-keys true))]
-                   (let [emit-id (str (:invoke-id emit))
-                         is-loaded (contains? graph-data (:invoke-id emit))
+            (when (and emits (> (count emits) 0))
+              ($ :div {:className "mt-4 bg-purple-50 p-3 rounded-md"}
+                 ($ :div {:className "text-sm font-medium text-purple-700 mb-2"}
+                    (str "Emits (" (count emits) ")"))
+                 ($ :div {:className "space-y-2"}
+                    (for [[idx emit] (map-indexed vector (js->clj emits :keywordize-keys true))]
+                      (let [emit-id (str (:invoke-id emit))
+                            is-loaded (contains? graph-data (:invoke-id emit))
                             ;; We no longer track loading state locally
-                         border-class (if is-loaded "border-purple-200" "border-dashed border-purple-300")
-                         cursor-class "cursor-pointer"
-                         bg-class (if is-loaded "bg-gray-50" "bg-white hover:bg-purple-50")]
-                     ($ :div {:key (str "emit-" idx)
-                              :className (str bg-class " p-2 rounded border " border-class " " cursor-class " transition-colors")
-                              :onClick (fn [e]
-                                         (.stopPropagation e)
-                                         (if is-loaded
-                                                ;; Find and select the loaded node
-                                           (let [nodes (js->clj flow-nodes :keywordize-keys true)
-                                                 target-node (->> nodes
-                                                                  (filter #(= (-> % :data :node-id) (:invoke-id emit)))
-                                                                  first)]
-                                             (when (and target-node on-select-node)
-                                               (on-select-node (:invoke-id emit))))
+                            border-class (if is-loaded "border-purple-200" "border-dashed border-purple-300")
+                            cursor-class "cursor-pointer"
+                            bg-class (if is-loaded "bg-gray-50" "bg-white hover:bg-purple-50")]
+                        ($ :div {:key (str "emit-" idx)
+                                 :className (str bg-class " p-2 rounded border " border-class " " cursor-class " transition-colors")
+                                 :onClick (fn [e]
+                                            (.stopPropagation e)
+                                            (if is-loaded
+                                              ;; Find and select the loaded node
+                                              (let [nodes (js->clj flow-nodes :keywordize-keys true)
+                                                    target-node (->> nodes
+                                                                     (filter #(= (-> % :data :node-id) (:invoke-id emit)))
+                                                                     first)]
+                                                (when (and target-node on-select-node)
+                                                  (on-select-node (:invoke-id emit))))
                                               ;; Load the unloaded node
-                                           (when on-paginate-node
-                                             (on-paginate-node emit-id))))}
-                        ($ :div {:className "text-xs text-purple-600"}
-                           ($ :div (str "→ " (:node-name emit)))
-                           (when (:args emit)
-                             ($ generic-data-viewer {:data (:args emit)
-                                                     :color "purple"
-                                                     :truncate-length 60
-                                                     :depth 0}))
-                           ($ :div {:className "text-purple-400 mt-1 font-mono text-xs"}
-                              (str "ID: " emit-id)))))))))))))
+                                              (when on-paginate-node
+                                                (on-paginate-node emit-id))))}
+                           ($ :div {:className "text-xs text-purple-600"}
+                              ($ :div (str "→ " (:node-name emit)))
+                              (when (:args emit)
+                                ($ generic-data-viewer {:data (:args emit)
+                                                        :color "purple"
+                                                        :truncate-length 60
+                                                        :depth 0}))
+                              ($ :div {:className "text-purple-400 mt-1 font-mono text-xs"}
+                                 (str "ID: " emit-id))))))))))))))
 
 (defui forking-input-component [{:keys [selected-node changed-nodes on-change-node-input affected-nodes]}]
   (let [data (when selected-node
@@ -343,17 +453,17 @@
         node-id (:node-id data)
         node-name (:node data)
         original-input (:input data)
-        
+
         ;; Function to pretty-print ClojureScript data to a JSON string
         to-pretty-json (fn [val] (js/JSON.stringify (clj->js val) nil 2))
 
         ;; Initial text for the textarea
         current-input (get changed-nodes node-id (to-pretty-json original-input))
         [input-text set-input-text] (uix/use-state current-input)
-        
+
         ;; Check if the current input is valid JSON
         is-valid-json? (try (js/JSON.parse input-text) true (catch :default _ false))
-        
+
         is-affected (contains? affected-nodes node-id)]
 
     ;; Update input text when selected node changes
@@ -391,40 +501,133 @@
                                             :depth 0}))))
 
               ;; Normal editing interface for unaffected nodes  
-              ($ :div {:className "space-y-4"}
-                 ($ :div
-                    ($ :div {:className "flex justify-between items-center mb-2"}
-                       ($ :label {:className "block text-sm font-medium text-gray-700"}
-                          "New Input (JSON format):")
+            ($ :div {:className "space-y-4"}
+               ($ :div
+                  ($ :div {:className "flex justify-between items-center mb-2"}
+                     ($ :label {:className "block text-sm font-medium text-gray-700"}
+                        "New Input (JSON format):")
                        ;; Show validation status
-                       (if is-valid-json?
-                         ($ :span {:className "text-xs font-medium text-green-600 bg-green-100 px-2 py-1 rounded-full"} "Valid JSON")
-                         ($ :span {:className "text-xs font-medium text-red-600 bg-red-100 px-2 py-1 rounded-full"} "Invalid JSON")))
-                        
-                    ($ :textarea {:className (str "w-full h-32 p-3 border rounded-md font-mono text-sm resize-y transition-colors "
-                                                 (if is-valid-json?
-                                                   "border-gray-300 focus:ring-blue-500 focus:border-blue-500"
-                                                   "border-red-500 ring-2 ring-red-300 focus:ring-red-500 focus:border-red-500"))
-                                  :value input-text
-                                  :onChange (fn [e]
-                                              (let [new-value (.-value (.-target e))]
-                                                (set-input-text new-value)
-                                                (when on-change-node-input
-                                                  (on-change-node-input node-id new-value))))
-                                  :placeholder "Enter new input value as JSON..."})
-                 ($ :div {:className "text-xs text-gray-500"}
-                  ($ :span {:className "font-medium"} "Original (formatted as JSON): ")
-                  ($ :pre {:className "mt-1 p-2 bg-gray-100 rounded text-gray-700 whitespace-pre-wrap"}
-                     (to-pretty-json original-input))))))))))
+                     (if is-valid-json?
+                       ($ :span {:className "text-xs font-medium text-green-600 bg-green-100 px-2 py-1 rounded-full"} "Valid JSON")
+                       ($ :span {:className "text-xs font-medium text-red-600 bg-red-100 px-2 py-1 rounded-full"} "Invalid JSON")))
 
-(defui info-panel [{:keys [graph-data summary-data]}]
+                  ($ :textarea {:className (str "w-full h-32 p-3 border rounded-md font-mono text-sm resize-y transition-colors "
+                                                (if is-valid-json?
+                                                  "border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                                                  "border-red-500 ring-2 ring-red-300 focus:ring-red-500 focus:border-red-500"))
+                                :value input-text
+                                :onChange (fn [e]
+                                            (let [new-value (.-value (.-target e))]
+                                              (set-input-text new-value)
+                                              (when on-change-node-input
+                                                (on-change-node-input node-id new-value))))
+                                :placeholder "Enter new input value as JSON..."})
+                  ($ :div {:className "text-xs text-gray-500"}
+                     ($ :span {:className "font-medium"} "Original (formatted as JSON): ")
+                     ($ :pre {:className "mt-1 p-2 bg-gray-100 rounded text-gray-700 whitespace-pre-wrap"}
+                        (to-pretty-json original-input))))))))))
+
+(defui lineage-panel [{:keys [module-id agent-name task-id forks fork-of]}]
+  (let [has-lineage? (or (seq forks) (some? fork-of))
+        [show-all-forks set-show-all-forks] (useState false)
+        sorted-forks (sort forks)
+        has-many-forks? (> (count sorted-forks) 5)
+        displayed-forks (if (or show-all-forks (not has-many-forks?))
+                          sorted-forks
+                          (take 5 sorted-forks))]
+    (when has-lineage?
+      ($ :div {:className "bg-gray-50 p-4 rounded-lg border border-gray-200 mb-4"}
+         ($ :h4 {:className "text-md font-semibold text-gray-700 mb-2"} "Lineage")
+         ($ :div {:className "space-y-2"}
+
+            ;; Parent Link
+            (when fork-of
+              ($ :div {:className "flex items-center gap-2"}
+                 ($ :span {:className "text-sm font-medium text-gray-600"} "Fork of:")
+                 (let [parent-id (get fork-of :parent-agent-id)
+                       url (str "/agents/" module-id "/" agent-name "/invocations/" task-id "-" parent-id)]
+                   ($ wouter/Link {:href url
+                                   :className "font-mono text-sm text-blue-600 hover:underline"}
+                      (str task-id "-" parent-id)))))
+
+            ;; Children Links
+            (when (seq forks)
+              ($ :div {:className "flex flex-col items-start gap-1"}
+                 ($ :span {:className "text-sm font-medium text-gray-600 mb-1"}
+                    (str "Forks (" (count forks) "):"))
+                 ($ :ul {:className "list-disc list-inside pl-4"}
+                    (for [fork-id displayed-forks]
+                      ($ :li {:key fork-id}
+                         (let [url (str "/agents/" module-id "/" agent-name "/invocations/" task-id "-" fork-id)]
+                           ($ wouter/Link {:href url
+                                           :className "font-mono text-sm text-blue-600 hover:underline"}
+                              (str task-id "-" fork-id))))))
+                 ;; Show all/less button at the bottom
+                 (when has-many-forks?
+                   ($ :div {:className "pl-4 mt-1"}
+                      ($ :button {:className "text-xs text-blue-600 hover:underline cursor-pointer"
+                                  :onClick #(set-show-all-forks (not show-all-forks))}
+                         (if show-all-forks
+                           "Show less"
+                           (str "... show all (" (count forks) ")"))))))))))))
+
+(defui exceptions-panel [{:keys [summary-data graph-data on-select-node]}]
+  (let [exceptions (get-in summary-data [:exception-summaries])]
+    (when (seq exceptions)
+      ($ :div {:className "bg-red-50 p-3 rounded-lg border border-red-200"}
+         ($ :div {:className "text-sm font-medium text-red-700 mb-2 flex items-center gap-2"}
+            ($ ExclamationTriangleIcon {:className "w-5 h-5"})
+            (str "Exceptions (" (count exceptions) ")"))
+         ($ :div {:className "space-y-2"}
+            (for [[idx exc] (map-indexed vector exceptions)]
+              (let [invoke-id (:invoke-id exc)
+                    node-name (:node exc)
+                    throwable-str (:throwable-str exc)
+                    first-line (first (str/split-lines throwable-str))
+                    is-loaded? (contains? graph-data invoke-id)]
+                ($ :div {:key idx
+                         :className "bg-white p-2 rounded border border-red-100"}
+                   ;; Stack vertically instead of horizontal flex to prevent overflow
+                   ($ :div {:className "space-y-2"}
+                      ($ :div
+                         ($ :div {:className "font-semibold text-red-800 text-sm"} node-name)
+                         ;; Make the exception text clickable with hover effect
+                         ($ :div {:className "text-xs font-mono text-red-600 mt-1 break-words cursor-pointer hover:bg-red-100 px-1 py-0.5 rounded transition-colors"
+                                  :onClick (fn [e]
+                                             (.stopPropagation e)
+                                             (state/dispatch [:modal/show :exception-detail
+                                                              {:title (str "Exception in " node-name)
+                                                               :content throwable-str}]))
+                                  :title "Click to view full exception"}
+                              first-line))
+                      ($ :div {:className "flex items-center gap-2 justify-end"}
+                         ;; Button to navigate to the node in the graph
+                         ($ :button {:className (str "text-xs font-medium px-2 py-1 rounded "
+                                                     (if is-loaded?
+                                                       "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                                                       "bg-gray-200 text-gray-500 cursor-not-allowed"))
+                                     :onClick (fn [e]
+                                                (.stopPropagation e)
+                                                (when is-loaded? (on-select-node invoke-id)))
+                                     :disabled (not is-loaded?)
+                                     :title (if is-loaded?
+                                              "Go to node"
+                                              "Node not loaded (pagination)")}
+                            "Go to Node")))))))))))
+
+(defui info-panel [{:keys [graph-data summary-data on-select-node module-id agent-name task-id forks fork-of]}]
   (let [result (:result summary-data)
         failure? (:failure? result)
         result-val (:val result)]
 
     ($ :div {:className "space-y-4"}
 
-       ;; NEW: Final Result Panel
+       ($ lineage-panel {:module-id module-id
+                         :agent-name agent-name
+                         :task-id task-id
+                         :forks forks
+                         :fork-of fork-of})
+
        (when result
          ($ :div {:className "bg-gray-50 p-3 rounded-lg border border-gray-200"}
             ($ :div {:className "flex justify-between items-center mb-2"}
@@ -437,10 +640,15 @@
                                     :truncate-length 100
                                     :depth 0})))
 
+       ($ exceptions-panel {:summary-data summary-data
+                            :graph-data graph-data
+                            :on-select-node on-select-node})
+
        ($ :div {:className "text-sm font-medium text-gray-700 pt-2 border-t border-gray-200"} "Overall Stats")
 
        ;; Metrics grid
        (let [total-nodes (count graph-data)
+             retry-count (:retry-num summary-data)
              ;; Dummy values for now
              total-execution-time 2347
              total-tokens 45892
@@ -448,7 +656,7 @@
              store-writes 23
              model-calls 156]
          ($ :div {:className "grid grid-cols-1 gap-3"}
-          ;; Execution time
+            ;; Execution time
             ($ :div {:className "bg-gray-50 p-3 rounded-lg border border-gray-200"}
                ($ :div {:className "flex justify-between items-center"}
                   ($ :div
@@ -456,7 +664,17 @@
                   ($ :div {:className "text-right"}
                      ($ :div {:className "text-lg font-bold text-gray-800"} (str (.toLocaleString total-execution-time) "ms")))))
 
-;; Store operations
+            ;; Retry count
+            (when (and retry-count (> retry-count 0))
+              ($ :div {:className "bg-gray-50 p-3 rounded-lg border border-gray-200"}
+                 ($ :div {:className "flex justify-between items-center"}
+                    ($ :div {:className "flex items-center gap-2"}
+                       ($ ArrowPathIcon {:className "h-4 w-4 text-gray-600"})
+                       ($ :div {:className "text-sm font-medium text-gray-700"} "Retries"))
+                    ($ :div {:className "text-right"}
+                       ($ :div {:className "text-lg font-bold text-gray-800"} retry-count)))))
+
+            ;; Store operations
             ($ :div {:className "bg-gray-50 p-3 rounded-lg border border-gray-200"}
                ($ :div
                   ($ :div {:className "text-sm font-medium text-gray-700 mb-2"} "Store Operations")
@@ -468,7 +686,7 @@
                         ($ :div {:className "text-xs text-gray-600"} "Writes")
                         ($ :div {:className "text-lg font-bold text-gray-800"} store-writes)))))
 
-          ;; Model calls
+            ;; Model calls
             ($ :div {:className "bg-gray-50 p-3 rounded-lg border border-gray-200"}
                ($ :div {:className "flex justify-between items-center"}
                   ($ :div
@@ -476,7 +694,7 @@
                   ($ :div {:className "text-right"}
                      ($ :div {:className "text-lg font-bold text-gray-800"} model-calls))))
 
-          ;; Tokens
+            ;; Tokens
             ($ :div {:className "bg-gray-50 p-3 rounded-lg border border-gray-200"}
                ($ :div {:className "flex justify-between items-center"}
                   ($ :div
@@ -484,7 +702,8 @@
                   ($ :div {:className "text-right"}
                      ($ :div {:className "text-lg font-bold text-gray-800"} (str (.toLocaleString total-tokens)))))))))))
 
-(defui right-panel [{:keys [graph-data summary-data changed-nodes on-remove-node-change affected-nodes flow-nodes on-select-node on-execute-fork on-clear-fork forking-mode? on-toggle-forking-mode is-live]}]
+(defui right-panel [{:keys [graph-data summary-data changed-nodes on-remove-node-change affected-nodes flow-nodes on-select-node on-execute-fork on-clear-fork forking-mode? on-toggle-forking-mode is-live
+                            module-id agent-name task-id forks fork-of]}]
   (let [active-tab (state/use-sub [:ui :active-tab])]
 
     ;; Update forking mode when tab changes
@@ -526,7 +745,14 @@
        ;; Tab content
        ($ :div {:className "p-4 h-full overflow-y-auto"}
           (case active-tab
-            :info ($ info-panel {:graph-data graph-data :summary-data summary-data})
+            :info ($ info-panel {:graph-data graph-data
+                                 :summary-data summary-data
+                                 :on-select-node on-select-node
+                                 :module-id module-id
+                                 :agent-name agent-name
+                                 :task-id task-id
+                                 :forks forks
+                                 :fork-of fork-of})
 
             :fork (if (empty? changed-nodes)
                     ($ :div {:className "text-gray-500 text-center py-8"}
@@ -647,7 +873,8 @@
             #{}
             modified-node-ids)))
 
-(defui graph-view [{:keys [module-id agent-name invoke-id
+(defui graph-view [{:keys [module-id agent-name invoke-id task-id
+                           forks fork-of
                            graph-data real-edges summary-data implicit-edges
                            is-complete is-live connected?
                            selected-node-id forking-mode? changed-nodes
@@ -717,6 +944,11 @@
                                                            selected (= (when selected-node (.-id selected-node)) id)
                                                            has-changes (contains? changed-nodes node-id)
                                                            is-affected (and forking-mode? (contains? affected-nodes node-id))
+                                                           ;; Check if node is in progress
+                                                           in-progress? (and (:start-time-millis data)
+                                                                             (not (:finish-time-millis data)))
+                                                           ;; NEW: Check if the node is stuck (in-progress but the whole agent has finished)
+                                                           is-stuck? (and in-progress? is-complete)
                                                            base-classes (cond
                                                                           is-affected
                                                                           ["bg-gray-300" "text-gray-500" "border-2" "border-gray-400"]
@@ -737,18 +969,19 @@
                                                                                ["shadow-lg"])
                                                            common-classes ["p-3" "rounded-md" "transition-all" "duration-200"]
                                                            node-className (str/join " " (concat base-classes selection-classes common-classes))
-                                                           has-human-request (:human-request data)]
+                                                           has-human-request (:human-request data)
+                                                           has-exceptions (seq (:exceptions data))]
                                                        ($ :div {:className "relative"}
                                                           ($ :div {:className node-className
                                                                    :style {:width "170px" :height "40px" :opacity (if is-affected "0.6" "1.0")}}
                                                              label)
-                                                          (when (and (:result data) (not is-affected))
-                                                            ($ :div {:className "absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white shadow-sm"}))
-                                                          (when has-changes
-                                                            ($ :div {:className "absolute -top-1 -left-1 w-3 h-3 bg-orange-400 rounded-full border-2 border-white shadow-sm"}))
-                                                          (when (and has-human-request (not is-affected))
-                                                            ($ :div {:className "absolute -top-1 right-1 w-3 h-3 bg-amber-500 rounded-full border-2 border-white shadow-sm"}
-                                                               ($ :div {:className "absolute inset-0 bg-amber-500 rounded-full animate-pulse"})))
+                                                          ;; Consolidated status indicator bar in top-right corner
+                                                          ($ node-status-bar {:in-progress? in-progress?
+                                                                              :is-stuck? is-stuck?
+                                                                              :has-changes has-changes
+                                                                              :has-human-request has-human-request
+                                                                              :has-exceptions has-exceptions
+                                                                              :has-result (:result data)})
                                                           ($ Handle {:type "target" :position "top"})
                                                           ($ Handle {:type "source" :position "bottom"})))))
 
@@ -800,4 +1033,9 @@
                          :on-clear-fork on-clear-fork
                          :forking-mode? forking-mode?
                          :on-toggle-forking-mode on-toggle-forking-mode
-                         :is-live is-live})))))
+                         :is-live is-live
+                         :module-id module-id
+                         :agent-name agent-name
+                         :task-id task-id
+                         :forks forks
+                         :fork-of fork-of})))))

@@ -83,16 +83,16 @@
                                                              :module-id module-id
                                                              :agent-name agent-name}])
 
-                   (let [is-complete? (get-in db [:invocations-data invoke-id :is-complete])]
-
-                     (when-not is-complete?
-                       (state/dispatch [:invocation/fetch-graph-page
-                                        {:invoke-id invoke-id
-                                         :module-id module-id
-                                         :agent-name agent-name
-                                         :leaves []
-                                         :initial? true}]))
-                     nil)))
+                   ;; Always fetch data on navigation to ensure fresh data
+                   ;; Set status to loading immediately to prevent stale data display
+                   (state/dispatch [:db/set-value [:invocations-data invoke-id :status] :loading])
+                   (state/dispatch [:invocation/fetch-graph-page
+                                    {:invoke-id invoke-id
+                                     :module-id module-id
+                                     :agent-name agent-name
+                                     :leaves []
+                                     :initial? true}])
+                   nil))
 
 ;; =============================================================================
 ;; UNIFIED STREAMING LOOP
@@ -112,45 +112,59 @@
                     (fn [reply]
                       (if (:success reply)
                         (state/dispatch [:invocation/process-graph-page invoke-id (:data reply)])
-                        nil)))
+                        (state/dispatch [:invocation/fetch-graph-error invoke-id (:error reply)]))))
                    nil))
+
+(state/reg-event :invocation/fetch-graph-error
+                 (fn [db invoke-id error-info]
+                   [:invocations-data invoke-id (s/multi-path
+                                                 [:status (s/terminal-val :error)]
+                                                 [:error (s/terminal-val error-info)])]))
 
 (state/reg-event :invocation/process-graph-page
                  (fn [db invoke-id page-data]
                    (let [{:keys [nodes next-leaves summary historical-graph root-invoke-id
                                  task-id is-complete]} page-data
-                         current-invocation (get-in db [:current-invocation])
-                         was-incomplete? (not (get-in db [:invocations-data invoke-id :is-complete]))]
-
+                         current-invocation (get-in db [:current-invocation])]
+                     
+                     ;; Always update the summary and completion status first.
                      (when summary
-                       (state/dispatch [:db/set-values
-                                        [[:invocations-data invoke-id :summary] summary]
-                                        [[:invocations-data invoke-id :historical-graph] historical-graph]
-                                        [[:invocations-data invoke-id :root-invoke-id] root-invoke-id]
-                                        [[:invocations-data invoke-id :task-id] task-id]]))
+                       (let [{:keys [forks fork-of]} summary
+                             ;; Build key-value pairs conditionally
+                             kvps (cond-> [[[:invocations-data invoke-id :summary] summary]
+                                          [[:invocations-data invoke-id :task-id] task-id]
+                                          [[:invocations-data invoke-id :forks] forks]
+                                          [[:invocations-data invoke-id :fork-of] fork-of]
+                                          [[:invocations-data invoke-id :status] :success]]
+                                    (some? historical-graph)
+                                    (conj [[:invocations-data invoke-id :historical-graph] historical-graph])
+                                    
+                                    (some? root-invoke-id)
+                                    (conj [[:invocations-data invoke-id :root-invoke-id] root-invoke-id]))]
+                         (state/dispatch (into [:db/set-values] kvps))))
 
+                     
                      (when (contains? page-data :is-complete)
                        (state/dispatch [:db/set-value [:invocations-data invoke-id :is-complete] is-complete]))
-
+                     
+                     ;; Then merge the new nodes into the existing graph.
                      (when (and nodes (seq nodes))
-                       (state/dispatch [:invocation/merge-nodes invoke-id nodes]))
+                       (state/dispatch [:invocation/merge-nodes invoke-id nodes root-invoke-id]))
 
+                     ;; Now, decide on the next action based on the server response.
                      (cond
-                       (and is-complete was-incomplete?)
-                       (do
-                         (println "[POLLING-STATELESS] Agent is complete. Fetching final summary for" invoke-id)
-                         (state/dispatch [:invocation/fetch-graph-page
-                                          (assoc current-invocation :leaves [] :initial? true)]))
-
+                       ;; If the agent is complete, simply stop.
                        is-complete
                        (do (println "[POLLING-STATELESS] Loop ended.") nil)
 
+                       ;; If there are immediate next leaves, fast-poll.
                        (seq next-leaves)
                        (do
                          (println "[POLLING-STATELESS] Fast pagination: continuing...")
                          (state/dispatch [:invocation/fetch-graph-page
                                           (assoc current-invocation :leaves (vec next-leaves) :initial? false)]))
-
+                       
+                       ;; Otherwise, schedule a slow poll.
                        :else
                        (do
                          (println "[POLLING-STATELESS] Scheduling delayed re-poll...")
@@ -161,23 +175,27 @@
                                   current-leaves (state/get-unfinished-leaves current-db invoke-id)]
 
                               (if-not is-still-incomplete?
-                                (println "[POLLING-STATELESS] Delayed re-poll cancelled.")
+                                (println "[POLLING-STATELESS] Delayed re-poll cancelled (agent completed).")
                                 (do
                                   (state/dispatch [:db/update-value [:invocations-data invoke-id :idle-polls] (fnil inc 0)])
                                   (println "[POLLING-STATELESS] Delayed re-poll executing.")
                                   (state/dispatch [:invocation/fetch-graph-page
                                                    (assoc current-invocation :leaves current-leaves :initial? false)])))))
                           2000)))
-                     nil)))
+                     )
+                     nil))
+
+
 
 (state/reg-event :invocation/merge-nodes
-                 (fn [db invoke-id new-nodes-map]
+                 (fn [db invoke-id new-nodes-map root-invoke-id-from-payload]
                    (let [historical-graph (get-in db [:invocations-data invoke-id :historical-graph])
                          current-raw-nodes (get-in db [:invocations-data invoke-id :graph :raw-nodes])
                          merged-raw-nodes (merge current-raw-nodes new-nodes-map)
-
-                         root-invoke-id (get-in db [:invocations-data invoke-id :root-invoke-id])
-
+                         ;; Prioritize the ID from the payload, fallback to the one in db.
+                         root-invoke-id (or root-invoke-id-from-payload
+                                            (get-in db [:invocations-data invoke-id :root-invoke-id]))
+                         
                          {:keys [nodes edges implicit-edges]}
                          (build-drawable-graph merged-raw-nodes root-invoke-id historical-graph)]
 
