@@ -22,10 +22,11 @@ public interface AgentManager extends IFetchAgentClient, Closeable {
   void setDatasetName(UUID datasetId, String name);
   void setDatasetDescription(UUID datasetId, String description);
   void destroyDataset(UUID datasetId);
-  CompletableFuture<Void> addDatasetExampleAsync(UUID datasetId, String snapshotName, Object input, Object referenceOutput, Set<String> tags);
-  UUID addDatasetExample(UUID datasetId, String snapshotName, Object input, Object referenceOutput, Set<String> tags);
+  CompletableFuture<Void> addDatasetExampleAsync(UUID datasetId, Object input, AddDatasetExampleOptions options);
+  UUID addDatasetExample(UUID datasetId, Object input, AddDatasetExampleOptions options);
   void setDatasetExampleInput(UUID datasetId, String snapshotName, UUID exampleId, Object input);
   void setDatasetExampleReferenceOutput(UUID datasetId, String snapshotName, UUID exampleId, Object referenceOutput);
+  void setDatasetExampleSource(UUID datasetId, String snapshotName, UUID exampleId, String source);
   void removeDatasetExample(UUID datasetId, String snapshotName, UUID exampleId);
   void addDatasetExampleTag(UUID datasetId, String snapshotName, UUID exampleId, String tag);
   void removeDatasetExampleTag(UUID datasetId, String snapshotName, UUID exampleId, String tag);

@@ -22,7 +22,9 @@
     JsonNode]
    [com.networknt.schema
     JsonSchema
-    ValidationMessage]))
+    ValidationMessage]
+   [com.rpl.agentorama
+    AddDatasetExampleOptions]))
 
 
 (defrecord Person [name age])
@@ -688,15 +690,17 @@
            (apply aor/add-dataset-example! args)))
 
        (bind add-example-and-wait-java!
-         (fn [^com.rpl.agentorama.AgentManager manager dataset-id snapshot-bame
+         (fn [^com.rpl.agentorama.AgentManager manager dataset-id snapshot-name
               input reference-output tags]
            (Thread/sleep 2)
-           (.addDatasetExample manager
-                               dataset-id
-                               snapshot-bame
-                               input
-                               reference-output
-                               tags)))
+           (let [options (AddDatasetExampleOptions.)]
+             (set! (.snapshotName options) snapshot-name)
+             (set! (.referenceOutput options) reference-output)
+             (set! (.tags options) tags)
+             (.addDatasetExample manager
+                                 dataset-id
+                                 input
+                                 options))))
 
        (bind add-example-and-wait-async!
          (fn [& args]
@@ -704,10 +708,14 @@
            (.get ^java.util.concurrent.CompletableFuture
                  (apply aor/add-dataset-example-async! args))))
 
-       (bind examples-no-timestamps
+       (bind examples-cleaned
          (fn [examples]
            (setval
-            [ALL (multi-path :created-at :modified-at)]
+            [ALL
+             (multi-path :created-at
+                         :modified-at
+                         [:source nil?]
+                         [:linked-trace nil?])]
             NONE
             (vals examples))))
 
@@ -771,31 +779,42 @@
           pstate))
        (is (some? created-at))
        (is (= created-at modified-at))
-       (add-example-and-wait! manager
-                              ds-id1
-                              "example1-2"
-                              {:reference-output "output1-2"
-                               :tags #{"tag1" "tag2"}})
+       (bind li
+         (aor-types/->LinkedTrace "foo.Module"
+                                  "agent1"
+                                  (aor-types/->AgentInvokeImpl 1 2)))
+       (add-example-and-wait!
+        manager
+        ds-id1
+        "example1-2"
+        {:reference-output "output1-2"
+         :tags         #{"tag1" "tag2"}
+         :source       "ai"
+         :linked-trace li})
 
        (bind {:keys [examples pagination-params]}
          (queries/get-dataset-examples-page pstate ds-id1 nil 10 nil))
        (is (nil? pagination-params))
-       (is (= (examples-no-timestamps examples)
+       (is (= (examples-cleaned examples)
               [{:input "example1-1" :reference-output nil :tags #{}}
-               {:input "example1-2"
+               {:input        "example1-2"
                 :reference-output "output1-2"
-                :tags  #{"tag1" "tag2"}}]))
+                :tags         #{"tag1" "tag2"}
+                :source       "ai"
+                :linked-trace li}]))
        (verified-dataset-times
         ds-id1
         #(aor/snapshot-dataset! manager ds-id1 nil "snapshot1"))
        (bind {:keys [examples pagination-params]}
          (queries/get-dataset-examples-page pstate ds-id1 "snapshot1" 10 nil))
        (is (nil? pagination-params))
-       (is (= (examples-no-timestamps examples)
+       (is (= (examples-cleaned examples)
               [{:input "example1-1" :reference-output nil :tags #{}}
-               {:input "example1-2"
+               {:input        "example1-2"
                 :reference-output "output1-2"
-                :tags  #{"tag1" "tag2"}}]))
+                :tags         #{"tag1" "tag2"}
+                :source       "ai"
+                :linked-trace li}]))
        (add-example-and-wait-java! manager
                                    ds-id1
                                    "snapshot1"
@@ -805,32 +824,38 @@
        (bind {:keys [examples pagination-params]}
          (queries/get-dataset-examples-page pstate ds-id1 "snapshot1" 10 nil))
        (is (nil? pagination-params))
-       (is (= (examples-no-timestamps examples)
+       (is (= (examples-cleaned examples)
               [{:input "example1-1" :reference-output nil :tags #{}}
-               {:input "example1-2"
+               {:input        "example1-2"
                 :reference-output "output1-2"
-                :tags  #{"tag1" "tag2"}}
+                :tags         #{"tag1" "tag2"}
+                :source       "ai"
+                :linked-trace li}
                {:input "examples1-1" :reference-output nil :tags #{}}]))
 
        ;; verify original isn't affected
        (bind {:keys [examples pagination-params]}
          (queries/get-dataset-examples-page pstate ds-id1 nil 10 nil))
        (is (nil? pagination-params))
-       (is (= (examples-no-timestamps examples)
+       (is (= (examples-cleaned examples)
               [{:input "example1-1" :reference-output nil :tags #{}}
-               {:input "example1-2"
+               {:input        "example1-2"
                 :reference-output "output1-2"
-                :tags  #{"tag1" "tag2"}}]))
+                :tags         #{"tag1" "tag2"}
+                :source       "ai"
+                :linked-trace li}]))
 
        (aor/snapshot-dataset! manager ds-id1 "snapshot1" "snapshot2")
        (bind {:keys [examples pagination-params]}
          (queries/get-dataset-examples-page pstate ds-id1 "snapshot1" 10 nil))
        (is (nil? pagination-params))
-       (is (= (examples-no-timestamps examples)
+       (is (= (examples-cleaned examples)
               [{:input "example1-1" :reference-output nil :tags #{}}
-               {:input "example1-2"
+               {:input        "example1-2"
                 :reference-output "output1-2"
-                :tags  #{"tag1" "tag2"}}
+                :tags         #{"tag1" "tag2"}
+                :source       "ai"
+                :linked-trace li}
                {:input "examples1-1" :reference-output nil :tags #{}}]))
 
 
@@ -897,24 +922,42 @@
         #(aor/remove-dataset-example! manager ds-id1 id2))
        (aor/remove-dataset-example! manager ds-id1 id3 {:snapshot "snapshot1"})
 
+
+       (verified-example-times
+        ds-id1
+        nil
+        id1
+        #(aor/set-dataset-example-source! manager ds-id1 id1 "manual"))
+
+
+       (aor/set-dataset-example-source! manager
+                                        ds-id1
+                                        id1
+                                        "manual2"
+                                        {:snapshot "snapshot1"})
+
        (bind {:keys [examples pagination-params]}
          (queries/get-dataset-examples-page pstate ds-id1 nil 10 nil))
        (is (nil? pagination-params))
-       (is (= (examples-no-timestamps examples)
-              [{:input "!!example-1"
+       (is (= (examples-cleaned examples)
+              [{:input  "!!example-1"
                 :reference-output "out1"
-                :tags  #{"bar"}}]))
+                :tags   #{"bar"}
+                :source "manual"}]))
 
        (bind {:keys [examples pagination-params]}
          (queries/get-dataset-examples-page pstate ds-id1 "snapshot1" 10 nil))
        (is (nil? pagination-params))
-       (is (= (examples-no-timestamps examples)
-              [{:input "snapshot-example-1"
+       (is (= (examples-cleaned examples)
+              [{:input  "snapshot-example-1"
                 :reference-output "snap-out-1"
-                :tags  #{"a" "c"}}
-               {:input "example1-2"
+                :tags   #{"a" "c"}
+                :source "manual2"}
+               {:input        "example1-2"
                 :reference-output "output1-2"
-                :tags  #{"tag1" "tag2"}}]))
+                :tags         #{"tag1" "tag2"}
+                :source       "ai"
+                :linked-trace li}]))
 
        (is (= #{"snapshot1" "snapshot2"}
               (queries/get-dataset-snapshot-names pstate ds-id1)))
@@ -983,7 +1026,7 @@
        (bind {:keys [examples pagination-params]}
          (queries/get-dataset-examples-page pstate ds-id3 nil 10 nil))
        (is (nil? pagination-params))
-       (is (= (examples-no-timestamps examples)
+       (is (= (examples-cleaned examples)
               [{:input {"p1" [1 2 3]}
                 :reference-output "xyz"
                 :tags  #{}}
@@ -1020,7 +1063,7 @@
        (bind {:keys [examples pagination-params]}
          (queries/get-dataset-examples-page pstate ds-id3 nil 10 nil))
        (is (nil? pagination-params))
-       (is (= (examples-no-timestamps examples)
+       (is (= (examples-cleaned examples)
               [{:input {"p1" [10]}
                 :reference-output "ww"
                 :tags  #{}}
@@ -1043,7 +1086,7 @@
        (bind {:keys [examples pagination-params]}
          (queries/get-dataset-examples-page pstate ds-id3 nil 3 nil))
        (is (some? pagination-params))
-       (is (= (examples-no-timestamps examples)
+       (is (= (examples-cleaned examples)
               [{:input {"p1" [10]}
                 :reference-output "ww"
                 :tags  #{}}
@@ -1063,7 +1106,7 @@
                                             3
                                             pagination-params))
        (is (nil? pagination-params))
-       (is (= (examples-no-timestamps examples)
+       (is (= (examples-cleaned examples)
               [{:input {"p1" [8]}
                 :reference-output nil
                 :tags  #{}}
@@ -1129,12 +1172,14 @@
                                             100
                                             pagination-params))
        (is (nil? pagination-params))
-       (is (= (examples-no-timestamps examples)
-              [{:input "a"
+       (is (= (examples-cleaned examples)
+              [{:input  "a"
                 :reference-output "x"
-                :tags  #{"t1" "t2"}}
-               {:input "b"
+                :tags   #{"t1" "t2"}
+                :source "bulkUpload"}
+               {:input  "b"
                 :reference-output nil
-                :tags  #{}}
+                :tags   #{}
+                :source "bulkUpload"}
               ]))
       ))))

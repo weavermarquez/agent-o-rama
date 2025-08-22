@@ -16,6 +16,7 @@
    [com.rpl.rama.aggs :as aggs])
   (:import
    [com.rpl.agentorama
+    AddDatasetExampleOptions
     AgentClient
     AgentClient$StreamAllCallback
     AgentClient$StreamCallback
@@ -618,30 +619,32 @@
         datasets-depot
         (aor-types/->valid-DestroyDataset datasetId)))
      (addDatasetExampleAsync
-       [this datasetId snapshotName input referenceOutput tags]
-       (let [uuid (h/random-uuid7)]
+       [this datasetId input options]
+       (let [options (or options (AddDatasetExampleOptions.))
+             uuid    (h/random-uuid7)]
          (-> (foreign-append-async!
               datasets-depot
               (aor-types/->valid-AddDatasetExample
                datasetId
-               snapshotName
+               (.snapshotName options)
                uuid
                input
-               referenceOutput
-               (into #{} tags)))
+               (.referenceOutput options)
+               (into #{} (.tags options))
+               (.source options)
+               (.linkedTrace options)
+              ))
              (.thenApply
               (h/cf-function [{error aor-types/AGENTS-TOPOLOGY-NAME}]
                 (when error
                   (throw (h/ex-info "Error adding example" {:info error})))
                 uuid
               )))))
-     (addDatasetExample [this datasetId snapshotName input referenceOutput tags]
+     (addDatasetExample [this datasetId input options]
        (.get (.addDatasetExampleAsync this
                                       datasetId
-                                      snapshotName
                                       input
-                                      referenceOutput
-                                      tags)))
+                                      options)))
      (setDatasetExampleInput [this datasetId snapshotName exampleId input]
        (let [{error aor-types/AGENTS-TOPOLOGY-NAME}
              (foreign-append!
@@ -667,6 +670,14 @@
          (when error
            (throw (h/ex-info "Error updating example" {:info error})))
        ))
+     (setDatasetExampleSource [this datasetId snapshotName exampleId source]
+       (foreign-append!
+        datasets-depot
+        (aor-types/->valid-UpdateDatasetExample datasetId
+                                                snapshotName
+                                                exampleId
+                                                :source
+                                                source)))
      (removeDatasetExample [this datasetId snapshotName exampleId]
        (foreign-append!
         datasets-depot
@@ -860,15 +871,21 @@
    ;; types are validated by Java API
    (h/validate-options! name
                         options
-                        {:snapshot h/any-spec
+                        {:snapshot         h/any-spec
                          :reference-output h/any-spec
-                         :tags     h/any-spec})
-   (.addDatasetExampleAsync manager
-                            dataset-id
-                            (:snapshot options)
-                            input
-                            (:reference-output options)
-                            (:tags options))))
+                         :tags             h/any-spec
+                         :source           h/any-spec
+                         :linked-trace     h/any-spec})
+   (let [joptions (AddDatasetExampleOptions.)]
+     (set! (.snapshotName joptions) (:snapshot options))
+     (set! (.referenceOutput joptions) (:reference-output options))
+     (set! (.tags joptions) (:tags options))
+     (set! (.source joptions) (:source options))
+     (set! (.linkedTrace joptions) (:linked-trace options))
+     (.addDatasetExampleAsync manager
+                              dataset-id
+                              input
+                              joptions))))
 
 (defn add-dataset-example!
   ([manager dataset-id input]
@@ -907,6 +924,24 @@
                                       (:snapshot options)
                                       example-id
                                       reference-output)))
+
+(defn set-dataset-example-source!
+  ([manager dataset-id example-id source]
+   (set-dataset-example-source! manager
+                                dataset-id
+                                example-id
+                                source
+                                nil))
+  ([^AgentManager manager dataset-id example-id source options]
+   ;; types are validated by Java API
+   (h/validate-options! name
+                        options
+                        {:snapshot h/any-spec})
+   (.setDatasetExampleSource manager
+                             dataset-id
+                             (:snapshot options)
+                             example-id
+                             source)))
 
 (defn remove-dataset-example!
   ([manager dataset-id example-id]
