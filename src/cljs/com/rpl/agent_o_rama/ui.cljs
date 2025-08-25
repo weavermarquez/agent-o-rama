@@ -5,8 +5,10 @@
    [clojure.string :as str]
 
    [com.rpl.agent-o-rama.ui.agents :as agents]
-   ["wouter" :refer [Link Route Switch Router useLocation useRoute]]
-   ["@heroicons/react/24/outline" :refer [HomeIcon CpuChipIcon CircleStackIcon ChevronLeftIcon ChevronRightIcon]]
+   [com.rpl.agent-o-rama.ui.config-page :as config-page]
+   ["wouter" :refer [Link Route Switch Router useLocation]]
+   ["@heroicons/react/24/outline" :refer [HomeIcon CpuChipIcon CircleStackIcon ChevronLeftIcon ChevronRightIcon
+                                          RectangleStackIcon ChartBarIcon BeakerIcon Cog6ToothIcon]]
 
    [com.rpl.agent-o-rama.ui.common :as common]
    [com.rpl.agent-o-rama.ui.stats :as stats]
@@ -16,70 +18,100 @@
    [com.rpl.agent-o-rama.ui.events])) ;; Ensure event handlers are registered at app startup
 
 ;; Sidebar navigation component
+ ;; Reusable nav-link component
+(defui nav-link [{:keys [href location collapsed? title children]}]
+  (let [is-active? (or (= location href)
+                       (and (not= href "/") (.startsWith location href)))
+        link-classes (str "flex items-center rounded-md transition-colors text-sm font-medium "
+                          (if collapsed?
+                            "justify-center p-2 w-10 h-10"
+                            "px-3 py-2")
+                          (if is-active?
+                            " bg-gray-300 text-gray-900"
+                            " hover:bg-gray-200 text-gray-700"))]
+    ($ Link {:href href :className link-classes :title (when collapsed? title)}
+       (if collapsed?
+         (first children) ; Only show the icon when collapsed
+         children)))) ; Show icon and label ; Show icon and label ; Show icon and label 
+
+;; Agent-specific navigation component
+(defui agent-context-nav [{:keys [module-id agent-name collapsed?]}]
+  (let [[location _] (useLocation)]
+    ($ :<>
+       ($ :div.border-t.border-gray-300.my-3.pt-3.space-y-2
+          (when-not collapsed?
+            ($ :div.px-3.text-xs.font-semibold.text-gray-500 "MODULE"))
+
+          ($ nav-link {:href (str "/agents/" module-id "/" agent-name "/datsets")
+                       :location location :collapsed? collapsed? :title "Datasets"}
+             ($ ChartBarIcon {:className "h-5 w-5 flex-shrink-0"})
+             (when-not collapsed? ($ :span.ml-3 "Datasets")))
+
+          ($ nav-link {:href (str "/agents/" module-id "/" agent-name "/evaluations")
+                       :location location :collapsed? collapsed? :title "Evaluations"}
+             ($ BeakerIcon {:className "h-5 w-5 flex-shrink-0"})
+             (when-not collapsed? ($ :span.ml-3 "Evaluations"))))
+
+       ($ :div.border-t.border-gray-300.my-3.pt-3.space-y-2
+          (when-not collapsed?
+            ($ :div.px-3.text-xs.font-semibold.text-gray-500 "AGENT"))
+
+          ($ nav-link {:href (str "/agents/" module-id "/" agent-name "/invocations")
+                       :location location :collapsed? collapsed? :title "Invocations"}
+             ($ RectangleStackIcon {:className "h-5 w-5 flex-shrink-0"})
+             (when-not collapsed? ($ :span.ml-3 "Invocations")))
+
+          ($ nav-link {:href (str "/agents/" module-id "/" agent-name "/config")
+                       :location location :collapsed? collapsed? :title "Config"}
+             ($ Cog6ToothIcon {:className "h-5 w-5 flex-shrink-0"})
+             (when-not collapsed? ($ :span.ml-3 "Config")))))))
+
 (defui sidebar-nav []
   (let [[location _] (useLocation)
-        ;; NEW: Use the hook from common.cljs
+        ;; this is a hack, because wouter doesn't support useParams outside of Route components
+        ;; or nested routes. probably should switch to reitit or something.
+        url-segments (-> location
+                         (str/replace #"^/" "")
+                         (str/split #"/")
+                         vec)
+        ;; Extract agent context from URL: /agents/module-id/agent-name/...
+        [section module-id agent-name] url-segments
+        is-agent-context? (and (= section "agents") module-id agent-name)
         [collapsed? set-collapsed] (common/use-local-storage "sidebar-collapsed?" false)
         toggle-collapsed #(set-collapsed (not collapsed?))]
+
     ($ :div {:className (str "h-screen flex flex-col bg-gray-100 transition-all duration-300 "
                              (if collapsed? "w-16" "w-64"))}
-       ;; Header
+       ;; Header (no changes here)
        ($ :div.flex.items-center.justify-between.p-4.border-b.border-gray-200.overflow-hidden
           (when-not collapsed?
             ($ :img {:src "/logo-black.png"
                      :alt "Agent-O-Rama"
                      :className "h-8 max-w-48 object-contain"}))
-          ($ :button
-             {:onClick toggle-collapsed
-              :className "p-2 rounded-md hover:bg-gray-200 transition-colors"
-              :title (if collapsed? "Expand sidebar" "Collapse sidebar")}
+          ($ :button {:onClick toggle-collapsed
+                      :className "p-2 rounded-md hover:bg-gray-200 transition-colors"
+                      :title (if collapsed? "Expand sidebar" "Collapse sidebar")}
              (if collapsed?
                ($ ChevronRightIcon {:className "h-5 w-5"})
                ($ ChevronLeftIcon {:className "h-5 w-5"}))))
 
        ;; Navigation
        ($ :nav.flex-1.p-3
+          ;; Global Navigation (always visible)
           ($ :div.space-y-2
-             ;; Overview link
-             ($ Link
-                {:href "/"
-                 :className (str "flex items-center px-3 py-2 rounded-md transition-colors "
-                                 (if collapsed? "justify-center" "")
-                                 (if (= location "/")
-                                   "bg-gray-300 text-gray-900"
-                                   "hover:bg-gray-200 text-gray-700"))
-                 :title (when collapsed? "Overview")}
+             ($ nav-link {:href "/" :location location :collapsed? collapsed? :title "Overview"}
                 ($ HomeIcon {:className "h-5 w-5 flex-shrink-0"})
-                (when-not collapsed?
-                  ($ :span.ml-3 "Overview")))
+                (when-not collapsed? ($ :span.ml-3 "Overview"))))
 
-             ;; Agents link
-             ($ Link
-                {:href "/agents"
-                 :className (str "flex items-center px-3 py-2 rounded-md transition-colors "
-                                 (if collapsed? "justify-center" "")
-                                 (if (or (= location "/agents")
-                                         (.startsWith location "/agents/"))
-                                   "bg-gray-300 text-gray-900"
-                                   "hover:bg-gray-200 text-gray-700"))
-                 :title (when collapsed? "Agents")}
-                ($ CpuChipIcon {:className "h-5 w-5 flex-shrink-0"})
-                (when-not collapsed?
-                  ($ :span.ml-3 "Agents")))
+          (when is-agent-context?
+            ($ agent-context-nav {:module-id module-id
+                                  :agent-name agent-name
+                                  :collapsed? collapsed?}))
 
-             ;; Datasets link
-             ($ Link
-                {:href "/datasets"
-                 :className (str "flex items-center px-3 py-2 rounded-md transition-colors "
-                                 (if collapsed? "justify-center" "")
-                                 (if (or (= location "/datasets")
-                                         (.startsWith location "/datasets/"))
-                                   "bg-gray-300 text-gray-900"
-                                   "hover:bg-gray-200 text-gray-700"))
-                 :title (when collapsed? "Datasets")}
-                ($ CircleStackIcon {:className "h-5 w-5 flex-shrink-0"})
-                (when-not collapsed?
-                  ($ :span.ml-3 "Datasets"))))))))
+          ;; TODO: You can add another section here for Datasets when a module-id is present but an agent-name is not.
+          ;; (when (and module-id (not agent-name))
+          ;;  ($ dataset-context-nav ...))
+          ))))
 
 ;; Breadcrumb for sub-navigation within sections
 (defui breadcrumb []
@@ -144,43 +176,25 @@
                        (common/url-decode (:label item)))))))
              breadcrumb-items))))))
 
-;; Main content area wrapper
-(defui main-content []
-  ($ :div.flex-1.flex.flex-col.min-h-0
-     ($ breadcrumb)
-     ($ :div.flex-1.overflow-auto
-        ($ Router
-           ;; Agent routes
-           ($ Route {:path "/agents/:module-id/:agent-name/invocations" :component agents/invocations})
-           ($ Route {:path "/agents/:module-id/:agent-name/invocations/:invoke-id" :component agents/invoke})
-           ($ Route {:path "/agents/:module-id/:agent-name/evaluations" :component agents/evaluations})
-           ($ Route {:path "/agents/:module-id/:agent-name/stats" :component stats/stats})
-           ($ Route {:path "/agents/:module-id/:agent-name" :component agents/agent})
-           ($ Route {:path "/agents" :component agents/index})
-
-           ;; Home route
-           ($ Route {:path "/" :component agents/index})))))
-
-;; Main app component
  ;; Main app component
 (defui app []
-  ($ :<>
+  ($ Router
      ($ :div.flex.h-screen.bg-gray-50
         ($ sidebar-nav)
         ($ :div.flex-1.flex.flex-col.min-h-0
            ($ breadcrumb)
            ($ :div.flex-1.overflow-auto
-              ($ Router
-                 ;; Agent routes
-                 ($ Route {:path "/agents/:module-id/:agent-name/invocations" :component agents/invocations})
-                 ($ Route {:path "/agents/:module-id/:agent-name/invocations/:invoke-id" :component agents/invoke})
-                 ($ Route {:path "/agents/:module-id/:agent-name/evaluations" :component agents/evaluations})
-                 ($ Route {:path "/agents/:module-id/:agent-name/stats" :component stats/stats})
-                 ($ Route {:path "/agents/:module-id/:agent-name" :component agents/agent})
-                 ($ Route {:path "/agents" :component agents/index})
+              ;; Agent routes
+              ($ Route {:path "/agents/:module-id/:agent-name/invocations" :component agents/invocations})
+              ($ Route {:path "/agents/:module-id/:agent-name/invocations/:invoke-id" :component agents/invoke})
+              ($ Route {:path "/agents/:module-id/:agent-name/evaluations" :component agents/evaluations})
+              ($ Route {:path "/agents/:module-id/:agent-name/config" :component config-page/config-page})
+              ($ Route {:path "/agents/:module-id/:agent-name/stats" :component stats/stats})
+              ($ Route {:path "/agents/:module-id/:agent-name" :component agents/agent})
+              ($ Route {:path "/agents" :component agents/index})
 
-                 ;; Home route
-                 ($ Route {:path "/" :component agents/index})))))
+              ;; Home route
+              ($ Route {:path "/" :component agents/index}))))
      ;; Global modal component
      ($ global-modal-component)))
 
