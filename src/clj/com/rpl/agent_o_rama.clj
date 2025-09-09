@@ -533,11 +533,6 @@
                                    cluster
                                    module-name
                                    (po/agent-root-task-global-name agentName))
-             streaming-pstate     (foreign-pstate
-                                   cluster
-                                   module-name
-                                   (po/agent-streaming-results-task-global-name
-                                    agentName))
              graph-history-pstate (foreign-pstate
                                    cluster
                                    module-name
@@ -642,6 +637,14 @@
                       (i/mk-failure-exception result exceptions))
                      (.complete cf (:val result))))
                ))))
+
+          (isAgentInvokeComplete [this agent-invoke]
+            (let [agent-task-id (.getTaskId agent-invoke)
+                  agent-id      (.getAgentInvokeId agent-invoke)]
+              (foreign-select-one [(keypath agent-id) :result (view some?)]
+                                  root-pstate
+                                  {:pkey agent-task-id})))
+
           (stream [this agent-invoke node]
             (.stream this agent-invoke node nil))
           (stream [this agent-invoke node stream-callback]
@@ -715,21 +718,21 @@
           aor-types/AgentClientInternal
           (stream-internal [this agent-invoke node callback-fn]
             (iclient/agent-stream-impl
-             streaming-pstate
+             root-pstate
              agent-invoke
              node
              callback-fn))
           (stream-specific-internal [this agent-invoke node node-invoke-id
                                      callback-fn]
             (iclient/agent-stream-specific-impl
-             streaming-pstate
+             root-pstate
              agent-invoke
              node
              node-invoke-id
              callback-fn))
           (stream-all-internal [this agent-invoke node callback-fn]
             (iclient/agent-stream-all-impl
-             streaming-pstate
+             root-pstate
              agent-invoke
              node
              callback-fn))
@@ -739,7 +742,6 @@
              :agent-config-depot   agent-config-depot
              :config-pstate        config-pstate
              :root-pstate          root-pstate
-             :streaming-pstate     streaming-pstate
              :graph-history-pstate graph-history-pstate
              :tracing-query        tracing-query
              :invokes-page-query   invokes-page-query
@@ -1016,6 +1018,10 @@
 (defn agent-result-async
   ^CompletableFuture [agent-client agent-invoke]
   (c/agent-result-async agent-client agent-invoke))
+
+(defn agent-invoke-complete?
+  [^AgentClient agent-client agent-invoke]
+  (.isAgentInvokeComplete agent-client agent-invoke))
 
 (defn agent-stream
   (^AgentStream [^AgentClient agent-client agent-invoke node]
