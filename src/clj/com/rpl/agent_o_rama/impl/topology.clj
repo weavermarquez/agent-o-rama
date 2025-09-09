@@ -210,7 +210,11 @@
     *agent-graph (po/agent-graph-task-global *agent-name)]
    (get *data :args :> *args)
    (ops/current-task-id :> *agent-task-id)
-   (gen-id $$id-gen :> *agent-id)
+   (get *data :forced-agent-invoke-id :> *forced-agent-id)
+   (<<if (some? *forced-agent-id)
+     (identity *forced-agent-id :> *agent-id)
+    (else>)
+     (gen-id $$id-gen :> *agent-id))
    (init-retry-num :> *retry-num)
    (init-root *agent-name *agent-id *retry-num *args :> *invoke-id)
    (local-transform> [(keypath *agent-id) (termval true)]
@@ -335,8 +339,8 @@
                   $$root
                   :> {:keys [*root-invoke-id *invoke-args *graph-version]})
    (<<if (nil? *invoke-args)
-     (h/throw! (h/ex-info "Forked agent ID does not exist"
-                          {:agent-id *agent-id})))
+     (throw! (h/ex-info "Forked agent ID does not exist"
+                        {:agent-id *agent-id})))
    (%affected-aggs *agent-task-id
                    *agent-id
                    (-> *invoke-id->new-args
@@ -357,9 +361,9 @@
                   $$root
                   :> *fork-graph-version)
    (<<if (not= *graph-version *fork-graph-version)
-     (h/throw! (h/ex-info "Cannot fork a run from an old version"
-                          {:current-version *fork-graph-version
-                           :old-version     *graph-version})))
+     (throw! (h/ex-info "Cannot fork a run from an old version"
+                        {:current-version *fork-graph-version
+                         :old-version     *graph-version})))
    (local-transform> [(keypath *fork-agent-id) (termval true)]
                      $$active)
    (local-transform> [(keypath *agent-id)
