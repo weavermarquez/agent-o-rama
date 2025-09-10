@@ -356,7 +356,7 @@
        dataset-id)
     )))
 
-(defn fetch-example-runs
+(defn fetch-example-info
   [local-ds datasets id dataset-id snapshot result+example-ids]
   (vec
    (for [[result-id example-id] result+example-ids
@@ -366,26 +366,71 @@
            [(keypath dataset-id :snapshots snapshot example-id)]
            datasets)
 
-          results
+          info
           (store/pstate-select-one
            [(keypath dataset-id
                      :experiments
                      id
                      :results
-                     result-id
-                     :agent-results)]
-           local-ds)
-
-          outputs (select [MAP-VALS :val] results)]
-         :when (not (selected-any? [MAP-VALS :failure? identity] results))]
+                     result-id)
+            (submap [:agent-results :evals])]
+           local-ds)]
+         :when (not (selected-any? [:agent-results MAP-VALS :result :failure? identity] info))]
      (do
-       (when-not (= 1 (count outputs))
+       (when-not (= 1 (count (:agent-results info)))
          (throw
           (h/ex-info
-           "Outputs when fetching example runs unexpectedly does not contain exactly one value"
-           {:outputs outputs})))
-       (aor-types/->ExampleRunImpl input reference-output (nth outputs 0)))
+           "Results when fetching example runs unexpectedly does not contain exactly one value"
+           {:results (:agent-results info)})))
+       (let [m (select-any [:agent-results MAP-VALS] info)
+             start-time-millis (:start-time-millis m)
+             finish-time-millis (:finish-time-millis m)]
+         {:input          input
+          :reference-output reference-output
+          :output         (-> m
+                              :result
+                              :val)
+          :latency-millis (when (and start-time-millis finish-time-millis)
+                            (- finish-time-millis start-time-millis))
+          :evals          (:evals info)}))
    )))
+
+(defn merge-number-evals
+  [eval-maps]
+  (let [wrap (fn [m]
+               (transform [MAP-VALS MAP-VALS]
+                          (fn [v]
+                            (cond
+                              (number? v) [v]
+                              (boolean? v) [(if v 1 0)]
+                              :else NONE))
+                          m))]
+    (apply merge-with (partial merge-with into) (mapv wrap eval-maps))))
+
+(def PERCENTILES [0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 0.99 0.999])
+
+(defn compute-number-stats
+  [nums]
+  (if (empty? nums)
+    (aor-types/->valid-EvalNumberStats 0 0 0 0 {})
+    (let [nums (vec (sort nums))
+          c    (count nums)]
+      (aor-types/->valid-EvalNumberStats
+       (reduce + 0 nums)
+       (long c)
+       (nth nums 0)
+       (nth nums (dec c))
+       (reduce
+        (fn [m p]
+          (assoc m p (nth nums (long (* p c)))))
+        {}
+        PERCENTILES)))))
+
+(defn compute-eval-number-stats
+  [example-info]
+  (->> (merge-number-evals (mapv :evals example-info))
+       (setval [MAP-VALS empty?] NONE)
+       (transform [MAP-VALS MAP-VALS] compute-number-stats)))
 
 (defn maybe-get-json-path
   [jp v]
@@ -480,8 +525,7 @@
                                    (foreign-select-one
                                     [(keypath dataset-id :snapshots snapshot example-id :input)]
                                     datasets))
-                   initiates-vol (volatile! [])
-                   results-vol   (volatile! [])]
+                   initiates-vol (volatile! [])]
                (when-not (some? (:example-id currm))
                  (store/pstate-transform!
                   [(keypath dataset-id :experiments id :results result-id :example-id)
@@ -504,18 +548,31 @@
                    )))
                (dotimes [i num-targets]
                  (hook:result-target i)
-                 (if-let [result (get agent-results i)]
-                   (vswap! results-vol conj result)
-                   (let [result (agent-result-obj (nth clients i)
-                                                  (:agent-invoke (nth @initiates-vol i)))]
+                 (if (nil? (get agent-results i))
+                   (let [client (nth clients i)
+
+                         {:keys [task-id agent-invoke-id] :as agent-invoke}
+                         (:agent-invoke (nth @initiates-vol i))
+
+                         result (agent-result-obj client agent-invoke)
+                         root   (:root-pstate (aor-types/underlying-objects client))
+                         ;; transferring timings allows it to persist even if underlying trace gets
+                         ;; GC'd
+                         {:keys [start-time-millis finish-time-millis]}
+                         (foreign-select-one
+                          [(keypath agent-invoke-id)
+                           (submap [:start-time-millis :finish-time-millis])]
+                          root
+                          {:pkey task-id})]
                      (store/pstate-transform!
                       [(keypath dataset-id :experiments id :results result-id :agent-results)
                        (nil->val (sorted-map))
                        (keypath i)
-                       (termval result)]
+                       (termval {:result result
+                                 :start-time-millis start-time-millis
+                                 :finish-time-millis finish-time-millis})]
                       local-ds
                       dataset-id)
-                     (vswap! results-vol conj result)
                    )))
              ))
            (c/emit! agent-node "evaluate" experiment remote-info result+example-ids)
@@ -546,7 +603,7 @@
                    (store/pstate-select-one
                     [(keypath dataset-id :experiments id :results result-id)]
                     local-ds)]
-               (when-not (selected-any? [MAP-VALS :failure? identity] agent-results)
+               (when-not (selected-any? [MAP-VALS :result :failure? identity] agent-results)
                  (doseq [[eval-name
                           {:keys [eval-fn input-json-path reference-output-json-path
                                   output-json-path]}]
@@ -568,6 +625,7 @@
                                 (maybe-get-json-path input-json-path input)
                                 (maybe-get-json-path reference-output-json-path reference-output)
                                 (select [MAP-VALS
+                                         :result
                                          :val
                                          (view (fn [v] (maybe-get-json-path output-json-path v)))]
                                         agent-results)))
@@ -580,21 +638,39 @@
      h/+concatv
      (fn [agent-node
           result+example-ids
-          [{:keys [id dataset-id snapshot] :as experiment} remote-info]]
+          [{:keys [id dataset-id snapshot spec] :as experiment} remote-info]]
        (with-retriever [agent-node experiment remote-info]
          [retriever]
          (let [eval-info  (all-evaluator-info retriever experiment)
                evaluators (relevant-evaluators agent-node eval-info #{:summary})
                datasets   (datasets-pstate retriever)
                local-ds   (local-datasets-store retriever)]
-           (when-not (empty? evaluators)
-             (let [example-runs
-                   (fetch-example-runs local-ds datasets id dataset-id snapshot result+example-ids)
+           (when (aor-types/RegularExperiment? spec)
+             (let [example-info
+                   (fetch-example-info local-ds datasets id dataset-id snapshot result+example-ids)
 
-                   {curr-evals :summary-evals curr-failures :summary-eval-failures}
+                   {curr-evals :summary-evals
+                    curr-failures :summary-eval-failures
+                    curr-eval-number-stats :eval-number-stats
+                    curr-latency-number-stats :latency-number-stats}
                    (store/pstate-select-one [(keypath dataset-id :experiments id)
-                                             (submap [:summary-evals :summary-eval-failures])]
+                                             (submap [:summary-evals :summary-eval-failures
+                                                      :eval-number-stats])]
                                             local-ds)]
+               (when (nil? curr-eval-number-stats)
+                 (let [eval-stats (compute-eval-number-stats example-info)]
+                   (store/pstate-transform!
+                    [(keypath dataset-id :experiments id :eval-number-stats)
+                     (termval eval-stats)]
+                    local-ds
+                    dataset-id)))
+               (when (nil? curr-latency-number-stats)
+                 (let [stats (compute-number-stats (mapv :latency-millis example-info))]
+                   (store/pstate-transform!
+                    [(keypath dataset-id :experiments id :latency-number-stats)
+                     (termval stats)]
+                    local-ds
+                    dataset-id)))
                (doseq [[eval-name
                         {:keys [eval-fn input-json-path reference-output-json-path
                                 output-json-path]}]
@@ -603,14 +679,16 @@
                        :when (and (not (contains? curr-evals eval-name))
                                   (not (contains? curr-failures eval-name)))
                        :let [example-runs
-                             (multi-transform
-                              [ALL
-                               (multi-path
-                                [:input (term #(maybe-get-json-path input-json-path %))]
-                                [:reference-output
-                                 (term #(maybe-get-json-path reference-output-json-path %))]
-                                [:output (term #(maybe-get-json-path output-json-path %))])]
-                              example-runs)]]
+                             (mapv
+                              (fn [{:keys [input reference-output output]}]
+                                (aor-types/->ExampleRunImpl (maybe-get-json-path input-json-path
+                                                                                 input)
+                                                            (maybe-get-json-path
+                                                             reference-output-json-path
+                                                             reference-output)
+                                                            (maybe-get-json-path output-json-path
+                                                                                 output)))
+                              example-info)]]
                  (hook:do-summary-eval eval-name)
                  (evaluate! local-ds
                             dataset-id
