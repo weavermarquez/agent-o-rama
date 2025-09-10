@@ -260,6 +260,10 @@
                (vswap! emits-vol conj {"node" node "args" (vec args)}))
              (result [this arg]
                (vreset! result-vol {:result arg}))
+             (getAgentObject [this name]
+               (.getAgentObject agent-node name))
+             (getAgentClient [this name]
+               (.getAgentClient agent-node name))
              (getStore [this name]
                (.getStore agent-node name))
              (streamChunk [this chunk])
