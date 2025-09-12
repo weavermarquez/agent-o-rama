@@ -21,9 +21,11 @@
    [com.rpl.agentorama.impl
     AgentDeclaredObjectsTaskGlobal]
    [com.rpl.agent_o_rama.impl.types
+    ComparativeExperiment
+    DeleteExperiment
+    RegularExperiment
     StartExperiment
-    UpdateExperimentName
-    DeleteExperiment]
+    UpdateExperimentName]
   ))
 
 (def EXPERIMENTER-NAME "_aor-experimenter")
@@ -117,6 +119,13 @@
         :else
         (throw (h/ex-info "Unexpected experiment spec" {:type (class spec)}))))
 
+(defn experiment-type->kw
+  [klass]
+  (cond
+    (= RegularExperiment klass) :regular
+    (= ComparativeExperiment klass) :comparative
+    :else (throw (h/ex-info "Unexpected experiment type" {:type klass}))))
+
 (defn validate-evaluator
   [agent-node spec {:keys [retrieval-failed? builder-name] :as evaluator}]
   (let [builders (get-evaluator-builders agent-node)
@@ -130,7 +139,7 @@
 
       (not (contains? (valid-evaluator-types spec) (:type info)))
       {:problem         "Evaluator type does not match experiment"
-       :experiment-type (class spec)
+       :experiment-type (experiment-type->kw (class spec))
        :evaluator-type  (:type info)})))
 
 (defn retrieve-all-examples-ids

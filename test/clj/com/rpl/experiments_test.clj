@@ -851,7 +851,7 @@
              (is (= (ex-data e)
                     {:res {:error    "Problem with one or more evaluators"
                            :problems [{:problem         "Evaluator type does not match experiment"
-                                       :experiment-type RegularExperiment
+                                       :experiment-type :regular
                                        :evaluator-type  :comparative
                                        :name            "identity-compare"
                                        :remote?         false}]}}))
@@ -888,12 +888,12 @@
              (is (= (ex-data e)
                     {:res {:error    "Problem with one or more evaluators"
                            :problems [{:problem         "Evaluator type does not match experiment"
-                                       :experiment-type ComparativeExperiment
+                                       :experiment-type :comparative
                                        :evaluator-type  :regular
                                        :name            "mylen"
                                        :remote?         false}
                                       {:problem         "Evaluator type does not match experiment"
-                                       :experiment-type ComparativeExperiment
+                                       :experiment-type :comparative
                                        :evaluator-type  :summary
                                        :name            "mycount"
                                        :remote?         false}]}}))
