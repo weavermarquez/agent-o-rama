@@ -10,6 +10,7 @@
     AgentNodeExecutorTaskGlobal
     RamaClientsTaskGlobal]
    [com.rpl.agent_o_rama.impl.types
+    AgentInvokeStats
     AgentNodeEmit
     AgentResult
     AggInput
@@ -110,6 +111,7 @@
      :finish-time-millis Long
      :last-progress-time-millis Long
      :retry-num          Long
+     :stats              AgentInvokeStats
      :human-requests     (set-schema NodeHumanInputRequest {:subindex? true})
      :fork-of            (fixed-keys-schema
                           {:parent-agent-id Long
@@ -269,9 +271,13 @@
                                                           {:agent-name   String
                                                            :agent-invoke AgentInvoke})}
                                   :agent-results   {Long (fixed-keys-schema
-                                                          {:result AgentResult
-                                                           :start-time-millis Long
-                                                           :finish-time-millis Long})}
+                                                          {:result             AgentResult
+                                                           :start-time-millis  Long
+                                                           :finish-time-millis Long
+                                                           :input-token-count  Long
+                                                           :output-token-count Long
+                                                           :total-token-count  Long
+                                                          })}
                                   :evals           {String {String Object}} ; eval-name->eval-key->result
                                   :eval-failures   {String String}
                                  })
@@ -280,6 +286,9 @@
         :summary-eval-failures {String String}
         :eval-number-stats     {String {String EvalNumberStats}}
         :latency-number-stats  EvalNumberStats
+        :input-token-number-stats EvalNumberStats
+        :output-token-number-stats EvalNumberStats
+        :total-token-number-stats EvalNumberStats
        })
       {:subindex? true})
     })})

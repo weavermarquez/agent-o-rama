@@ -433,6 +433,33 @@
    max :- Number
    percentiles :- {Double Number}])
 
+;; Analytics
+
+(drp/defrecord+ OpStats
+  [count :- Long
+   total-time-millis :- Long
+  ])
+
+(drp/defrecord+ BasicAgentInvokeStats
+  [nested-op-stats :- {clojure.lang.Keyword OpStats}
+   input-token-count :- Long
+   output-token-count :- Long
+   total-token-count :- Long
+   node-stats :- {String OpStats}
+  ])
+
+(drp/defrecord+ AgentRef
+  [module-name :- String
+   agent-name :- String])
+
+(drp/defrecord+ SubagentInvokeStats
+  [count :- Long
+   basic-stats :- BasicAgentInvokeStats])
+
+(drp/defrecord+ AgentInvokeStats
+  [subagent-stats :- {AgentRef SubagentInvokeStats}
+   basic-stats :- BasicAgentInvokeStats])
+
 ;; Internal protocols
 
 (defprotocol UnderlyingObjects
@@ -459,7 +486,8 @@
 (defprotocol AgentClientInternal
   (stream-internal [this agent-invoke node callback-fn])
   (stream-specific-internal [this agent-invoke node node-invoke-id callback-fn])
-  (stream-all-internal [this agent-invoke node callback-fn]))
+  (stream-all-internal [this agent-invoke node callback-fn])
+  (subagentNextStepAsync [this agent-invoke]))
 
 (defprotocol AgentManagerInternal
   (add-remote-dataset-internal [this dataset-id cluster-conductor-host cluster-conductor-port
@@ -521,7 +549,7 @@
   MAX-RETRIES
   natural-long?
   "Maximum number of times an agent should retry after failing"
-  3)
+  2)
 
 (defconfig
   STALL-CHECKER-THRESHOLD-MILLIS
