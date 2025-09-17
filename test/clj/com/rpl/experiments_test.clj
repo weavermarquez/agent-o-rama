@@ -506,6 +506,11 @@
 
          (bind ais (select [:results MAP-VALS :agent-initiates MAP-VALS :agent-invoke] res))
          (is (every? aor-types/AgentInvokeImpl? ais))
+         (doseq [{:keys [agent-invoke-id task-id]} ais]
+           (is (aor-types/ExperimentSource?
+                (foreign-select-one [(keypath agent-invoke-id) :source] foo-root {:pkey task-id})
+               )))
+
          (bind all-feedback (mapv root-feedback ais))
          (check-experiment-feedback! all-feedback
                                      [#{{"len" 20} {"concise?" true}}
