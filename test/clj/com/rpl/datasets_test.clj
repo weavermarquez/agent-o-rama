@@ -15,7 +15,8 @@
    [com.rpl.rama.aggs :as aggs]
    [com.rpl.rama.ops :as ops]
    [com.rpl.rama.test :as rtest]
-   [com.rpl.test-common :as tc])
+   [com.rpl.test-common :as tc]
+   [jsonista.core :as j])
   (:import
    [com.fasterxml.jackson.databind
     ObjectMapper
@@ -1218,7 +1219,58 @@
                                     nil
                                     (mapv :id less-examples))))
 
+       ;; test download-jsonl-examples! pagination
+       (bind ds-id-pagination
+         (create-and-wait! manager
+                           "Pagination test dataset"
+                           {:input-json-schema (to-json schema-str)}))
 
+       ;; Add 3 examples to force pagination with batch size 2
+       (add-example-and-wait! manager
+                              ds-id-pagination
+                              "example1"
+                              {:reference-output "output1" :tags #{"tag1"}})
+       (add-example-and-wait! manager ds-id-pagination "example2" {:tags #{"tag2"}})
+       (add-example-and-wait! manager
+                              ds-id-pagination
+                              "example3"
+                              {:reference-output "output3" :tags #{"tag1" "tag3"}})
+
+       (bind pagination-download-path (.resolve tmpdir "pagination-test.jsonl"))
+       (bind pagination-download-file (.toFile pagination-download-path))
+       (.deleteOnExit pagination-download-file)
+
+       (bind download-failures* (atom []))
+
+       ;; Test with batch size 2 to force pagination across 3 examples
+       (with-redefs [datasets/download-jsonl-batch-size (constantly 2)]
+         (datasets/download-jsonl-examples!
+          manager
+          ds-id-pagination
+          nil
+          (.toString pagination-download-path)
+          (fn [example-id ex]
+            (swap! download-failures* conj [example-id ex]))))
+
+       (is (empty? @download-failures*) "Should have no download failures")
+
+       ;; verify all 3 examples were downloaded despite pagination
+       (bind downloaded-lines
+         (with-open [r (io/reader pagination-download-file :encoding "UTF-8")]
+           (vec (line-seq r))))
+
+       (is (= 3 (count downloaded-lines))
+           "Should have downloaded exactly 3 examples with pagination")
+
+       ;; parse and check all examples are present
+       (bind parsed-lines
+         (mapv #(j/read-value %) downloaded-lines))
+
+       (is (= [{"input" "example1" "output" "output1" "tags" #{"tag1"}}
+               {"input" "example2" "tags" #{"tag2"}}
+               {"input" "example3" "output" "output3" "tags" #{"tag1" "tag3"}}]
+              (mapv #(update % "tags" set) parsed-lines))
+           "All examples should be downloaded correctly with pagination")
 
        ;; test search with filters
        (bind human-source (aor-types/->HumanSourceImpl "user"))
