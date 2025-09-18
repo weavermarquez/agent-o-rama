@@ -9,17 +9,19 @@
     AgentDeclaredObjectsTaskGlobal
     AgentNodeExecutorTaskGlobal
     RamaClientsTaskGlobal]
+   [com.rpl.agentorama.source
+    InfoSource]
    [com.rpl.agent_o_rama.impl.types
-    AgentInvokeStats
+    AgentInvokeStatsImpl
     AgentNodeEmit
     AgentResult
     AggInput
     EvalNumberStats
     ExceptionSummary
     ExperimentInputSelector
+    FeedbackImpl
     ForkContext
-    InfoSource
-    NestedOpInfo
+    NestedOpInfoImpl
     NodeHumanInputRequest
     HistoricalAgentGraphInfo
     Node
@@ -95,11 +97,7 @@
   (str "$$_agent-root-" agent-name))
 
 (def FEEDBACK-SCHEMA
-  [(fixed-keys-schema
-    {:scores      {String Object}
-     :source      InfoSource
-     :created-at  Long
-     :modified-at Long})])
+  [FeedbackImpl])
 
 (def AGENT-ROOT-PSTATE-SCHEMA
   {UUID
@@ -115,7 +113,7 @@
      :last-progress-time-millis Long
      :retry-num          Long
      :source             InfoSource
-     :stats              AgentInvokeStats
+     :stats              AgentInvokeStatsImpl
      :feedback           FEEDBACK-SCHEMA
      :human-requests     (set-schema NodeHumanInputRequest {:subindex? true})
      :fork-of            (fixed-keys-schema
@@ -169,7 +167,7 @@
     {:agent-id            UUID
      :agent-task-id       Long
      :node                String
-     :nested-ops          [NestedOpInfo]
+     :nested-ops          [NestedOpInfoImpl]
      :emits               [AgentNodeEmit]
      :result              AgentResult
      :start-time-millis   Long

@@ -4,7 +4,6 @@
   (:require
    [com.rpl.agent-o-rama.impl.helpers :as h]
    [com.rpl.agent-o-rama.impl.types :as aor-types]
-   [com.rpl.ramaspecter.defrecord-plus :as drp]
    [rpl.schema.core :as s])
   (:import
    [com.rpl.agentorama.store
@@ -20,7 +19,7 @@
 (def KV :kv)
 (def DOC :doc)
 
-(drp/defrecord+ StoreParams
+(aor-types/defaorrecord StoreParams
   [pstate-name :- String
    agent-name :- String
    agent-task-id :- Long
@@ -71,7 +70,7 @@
       (throw (:exception ret)))
     (vswap! (:nested-ops-vol store-params)
             conj
-            (aor-types/->NestedOpInfo
+            (aor-types/->NestedOpInfoImpl
              start-time
              finish-time
              :store-write
@@ -99,7 +98,7 @@
     (vswap!
      (:nested-ops-vol store-params)
      conj
-     (aor-types/->valid-NestedOpInfo
+     (aor-types/->valid-NestedOpInfoImpl
       start-time
       finish-time
       :store-read
