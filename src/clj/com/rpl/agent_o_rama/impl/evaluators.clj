@@ -115,15 +115,15 @@ Be strict: minor wording differences are acceptable, but factual errors, omissio
 
 (def BUILT-IN
   {"aor/llm-judge"
-   {:type :regular
+   {:type        :regular
     :builder-fn
     (fn [params]
-      (let [temperature (Double/parseDouble (get params "temperature"))
+      (let [temperature     (Double/parseDouble (get params "temperature"))
             prompt-template (get params "prompt")
-            model-name (get params "model")
-            output-schema (get params "outputSchema")]
+            model-name      (get params "model")
+            output-schema   (get params "outputSchema")]
         (fn [fetcher input ref-output output]
-          (let [model (.getAgentObject ^AgentObjectFetcher fetcher model-name)
+          (let [model  (.getAgentObject ^AgentObjectFetcher fetcher model-name)
                 prompt (-> prompt-template
                            (str/replace "%input" input)
                            (str/replace "%output" output)
@@ -132,7 +132,7 @@ Be strict: minor wording differences are acceptable, but factual errors, omissio
                 (lc4j/chat
                  (lc4j/chat-request
                   [prompt]
-                  {:temperature temperature
+                  {:temperature     temperature
                    :response-format
                    (lc4j/json-response-format
                     "Evaluation"
@@ -147,7 +147,7 @@ Be strict: minor wording differences are acceptable, but factual errors, omissio
      {"prompt"
       {:description
        "Prompt for the LLM. %input, %output, and %referenceOutput can be used as variables in the prompt"
-       :default DEFAULT-LLM-PROMPT}
+       :default     DEFAULT-LLM-PROMPT}
 
       "model"
       {:description
@@ -156,15 +156,15 @@ Be strict: minor wording differences are acceptable, but factual errors, omissio
       "temperature"
       {:description
        "Floating-point temperature of the LLM"
-       :default "0.0"}
+       :default     "0.0"}
       "outputSchema"
       {:description
        "JSON schema for the output of the LLM. Each key of the output is a separate evaluation score."
-       :default DEFAULT-LLM-OUTPUT-SCHEMA}}
+       :default     DEFAULT-LLM-OUTPUT-SCHEMA}}
      ;; All paths enabled by default (flags omitted = true)
-     }}
+    }}
    "aor/conciseness"
-   {:type :regular
+   {:type        :regular
     :builder-fn
     (fn [params]
       (let [len (Long/parseLong (get params "threshold"))]
@@ -177,13 +177,13 @@ Be strict: minor wording differences are acceptable, but factual errors, omissio
      {"threshold"
       {:description
        "Threshold length in terms of number of characters for a message to be concise"
-       :default "300"}}
+       :default     "300"}}
      :input-path? false
      :reference-output-path? false
      ;; output-path? defaults to true
-     }}
+    }}
    "aor/f1-score"
-   {:type :summary
+   {:type        :summary
     :builder-fn
     (fn [{:strs [positiveValue]}]
       (fn [fetcher example-runs]
@@ -208,13 +208,13 @@ Be strict: minor wording differences are acceptable, but factual errors, omissio
                {:tp 0 :fp 0 :fn 0}
                example-runs)
               precision (if (pos? (+ tp fp)) (/ tp (+ tp fp)) 0.0)
-              recall (if (pos? (+ tp fn)) (/ tp (+ tp fn)) 0.0)]
+              recall    (if (pos? (+ tp fn)) (/ tp (+ tp fn)) 0.0)]
           {"score"
            (if (pos? (+ precision recall))
              (double (/ (* 2 precision recall) (+ precision recall)))
              0.0)
            "precision" (double precision)
-           "recall" (double recall)})))
+           "recall"    (double recall)})))
     :description
     "Compute F1, precision, and recall scores on a list of runs using the provided 'positiveValue' param to determine true positives, false positives, and false negatives."
     :options
@@ -224,7 +224,7 @@ Be strict: minor wording differences are acceptable, but factual errors, omissio
        "Value considered a positive classification"}}
      :input-path? false
      ;; output-path? and reference-output-path? default to true
-     }}})
+    }}})
 (defn invalid-json-path
   [json-path]
   (if (empty? json-path)
@@ -252,16 +252,16 @@ Be strict: minor wording differences are acceptable, but factual errors, omissio
 (defn verify-evaluator-add
   [{:keys [builder-name params input-json-path output-json-path
            reference-output-json-path]}]
-  (let [builder-info (get (all-evaluator-builders) builder-name)
+  (let [builder-info    (get (all-evaluator-builders) builder-name)
         declared-params (-> builder-info
                             :options
                             :params)
-        declared-set (-> declared-params
-                         keys
-                         set)
-        provided-set (-> params
-                         keys
-                         set)]
+        declared-set    (-> declared-params
+                            keys
+                            set)
+        provided-set    (-> params
+                            keys
+                            set)]
     (cond
       (nil? builder-info)
       (format "Evaluator builder does not exist: %s" builder-name)
@@ -294,39 +294,39 @@ Be strict: minor wording differences are acceptable, but factual errors, omissio
   (<<with-substitutions
    [$$evals (po/evaluators-task-global)]
    (<<subsource *data
-                (case> AddEvaluator
-                       :> {:keys [*name *builder-name *params *description
-                                  *input-json-path *output-json-path
-                                  *reference-output-json-path]})
-                (local-select> (view contains? *name) $$evals :> *exists?)
-                (ifexpr *exists?
-                        "Evaluator already exists"
-                        (verify-evaluator-add *data)
-                        :> *error-str)
-                (<<if (some? *error-str)
-                      (ack-return> *error-str)
-                      (else>)
-                      (local-transform>
-                       [(keypath *name)
-                        (termval {:builder-name *builder-name
-                                  :builder-params *params
-                                  :description *description
-                                  :input-json-path *input-json-path
-                                  :output-json-path *output-json-path
-                                  :reference-output-json-path *reference-output-json-path})]
-                       $$evals))
+    (case> AddEvaluator
+           :> {:keys [*name *builder-name *params *description
+                       *input-json-path *output-json-path
+                       *reference-output-json-path]})
+     (local-select> (view contains? *name) $$evals :> *exists?)
+     (ifexpr *exists?
+       "Evaluator already exists"
+       (verify-evaluator-add *data)
+       :> *error-str)
+     (<<if (some? *error-str)
+       (ack-return> *error-str)
+      (else>)
+       (local-transform>
+        [(keypath *name)
+         (termval {:builder-name     *builder-name
+                   :builder-params   *params
+                   :description      *description
+                   :input-json-path  *input-json-path
+                   :output-json-path *output-json-path
+                   :reference-output-json-path *reference-output-json-path})]
+        $$evals))
 
-                (case> RemoveEvaluator :> {:keys [*name]})
-                (local-transform> [(keypath *name) NONE>] $$evals))))
+    (case> RemoveEvaluator :> {:keys [*name]})
+     (local-transform> [(keypath *name) NONE>] $$evals))))
 
 (defn try-evaluator-impl
   [evals-pstate try-eval-query all-eval-builders-query name type params]
   (let [{:keys [builder-name builder-params]} (foreign-select-one (keypath name)
                                                                   evals-pstate)
         all-builders (foreign-invoke-query all-eval-builders-query)
-        actual-type (-> all-builders
-                        (get builder-name)
-                        :type)]
+        actual-type  (-> all-builders
+                         (get builder-name)
+                         :type)]
     (when (nil? builder-name)
       (throw (h/ex-info "Evaluator does not exist" {:name name})))
     (when-not (contains? all-builders builder-name)
