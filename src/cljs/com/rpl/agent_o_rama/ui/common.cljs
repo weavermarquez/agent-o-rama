@@ -23,6 +23,10 @@
   "Converts a ClojureScript data structure to a JSON string."
   (js/JSON.stringify (clj->js x)))
 
+(defn pp-json [x]
+  "Converts a ClojureScript data structure to a pretty-printed JSON string."
+  (js/JSON.stringify (clj->js x) nil 2))
+
 (defn format-timestamp [ms]
   (if (number? ms)
     (let [date (js/Date. ms)
@@ -102,6 +106,27 @@
      [])
     is-visible))
 
+(defn cn
+  "Concatenate class names. Accepts strings, sequences, and maps of class->boolean."
+  [& parts]
+  (->> parts
+       (mapcat (fn [p]
+                 (cond
+                   (string? p) [p]
+                   (sequential? p) (remove str/blank? p)
+                   (map? p) (for [[k v] p :when v] (name k))
+                   :else [])))
+       (remove str/blank?)
+       (str/join " ")))
+
+(def table-classes
+  {:container "bg-white shadow sm:rounded-md overflow-auto"
+   :table "min-w-full divide-y divide-gray-200"
+   :thead "bg-gray-50"
+   :th "px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+   :td "px-6 py-4 text-sm text-gray-900"
+   :td-right "px-6 py-4 whitespace-nowrap text-right text-sm font-medium"})
+
 (defui spinner [{:keys [size]}]
   (let [size-class (case size
                      :small "h-3 w-3"
@@ -121,3 +146,28 @@
           {:className "opacity-75"
            :fill "currentColor"
            :d "M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"}))))
+
+(defui DropdownRow [{:keys [label selected? on-select delete-button action? icon extra-content]}]
+  (let [row-classes (cn
+                     "flex items-center justify-between w-full px-4 py-2 text-sm cursor-pointer hover:bg-gray-100 focus:bg-gray-100"
+                     {"bg-blue-50 text-blue-700" selected?
+                      "text-blue-600 hover:bg-blue-50" action?
+                      "text-gray-700" (not (or selected? action?))})]
+    ($ :div
+       ;; Main clickable area
+       ($ :div
+          {:onClick (fn [e]
+                      (.stopPropagation e)
+                      (when on-select (on-select)))
+           :className row-classes}
+          ($ :div.flex.items-center.flex-1
+             (when icon ($ :div.mr-3 icon))
+             ($ :span.truncate label)
+             (when selected? ($ :span.ml-2.text-xs.text-blue-600 "✓")))
+          ;; Delete button area (separate from main click area to avoid nesting)
+          (when (and delete-button (not action?))
+            ($ :div.ml-2
+               {:onClick #(.stopPropagation %)} ;; Prevent triggering the row click
+               delete-button)))
+       ;; Extra content below the main row
+       (when extra-content extra-content))))

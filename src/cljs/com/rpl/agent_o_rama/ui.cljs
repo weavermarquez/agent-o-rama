@@ -6,7 +6,17 @@
 
    [com.rpl.agent-o-rama.ui.agents :as agents]
    [com.rpl.agent-o-rama.ui.config-page :as config-page]
-   ["wouter" :refer [Link Route Switch Router useLocation]]
+   [com.rpl.agent-o-rama.ui.datasets :as datasets]
+   [com.rpl.agent-o-rama.ui.evaluators :as evaluators]
+   [com.rpl.agent-o-rama.ui.experiments.index :as experiments]
+   [com.rpl.agent-o-rama.ui.experiments.comparative :as comparative-experiments]
+   [com.rpl.agent-o-rama.ui.experiments.regular-detail :as experiments-detail]
+   [com.rpl.agent-o-rama.ui.experiments.comparative-detail :as comparative-experiments-detail]
+   [reitit.core :as r]
+   [reitit.frontend :as rf]
+   [reitit.frontend.easy :as rfe]
+   [reitit.coercion :as coercion]
+   [reitit.coercion.malli :as malli]
    ["@heroicons/react/24/outline" :refer [HomeIcon CpuChipIcon CircleStackIcon ChevronLeftIcon ChevronRightIcon
                                           RectangleStackIcon ChartBarIcon BeakerIcon Cog6ToothIcon]]
 
@@ -14,80 +24,183 @@
    [com.rpl.agent-o-rama.ui.stats :as stats]
    [com.rpl.agent-o-rama.ui.sente :as sente]
    [com.rpl.agent-o-rama.ui.state :as state]
-   [com.rpl.agent-o-rama.ui.invocation-graph-view :refer [global-modal-component]]
-   [com.rpl.agent-o-rama.ui.events])) ;; Ensure event handlers are registered at app startup
+   [com.rpl.agent-o-rama.ui.forms :refer [global-modal-component]]
+   [com.rpl.agent-o-rama.ui.queries :as queries]
+   [com.rpl.agent-o-rama.ui.events]
+   [com.rpl.agent-o-rama.ui.experiments.forms]
+   [com.rpl.agent-o-rama.ui.datasets.add-from-trace])) ;; Ensure event handlers are registered at app startup
 
-;; Sidebar navigation component
- ;; Reusable nav-link component
+(def routes
+  [""
+   ["/" {:name :home, :views [agents/index]}]
+   ["/agents"
+    ["" {:name :agents/index, :views [agents/index]}]
+    ["/:module-id"
+     ["/datasets"
+      ["" {:name :module/datasets, :views [datasets/index]}]
+      ["/:dataset-id"
+       {:name :module/dataset, :views [datasets/detail]}
+       ["" {:name :module/dataset-detail, :views [experiments/index]}]
+       ["/examples" {:name :module/dataset-detail.examples, :views [datasets/detail-examples]}]
+       ["/experiments" {:name :module/dataset-detail.experiments, :views [experiments/index]}]
+       ["/experiments/:experiment-id" {:name :module/dataset-detail.experiment-detail, :views [experiments-detail/regular-experiment-detail-page]}]
+       ["/comparative-experiments" {:name :module/dataset-detail.comparative-experiments, :views [comparative-experiments/index]}]
+       ["/comparative-experiments/:experiment-id" {:name :module/dataset-detail.comparative-experiment-detail, :views [comparative-experiments-detail/detail-page]}]]]
+     ["/evaluations" {:name :module/evaluations, :views [evaluators/index]}]
+     ["/agent/:agent-name"
+      ["" {:name :agent/detail, :views [agents/agent]}]
+      ["/invocations"
+       ["" {:name :agent/invocations, :views [agents/invocations]}]
+       ["/:invoke-id" {:name :agent/invocation-detail, :views [agents/invoke]}]]
+      ["/config" {:name :agent/config, :views [config-page/config-page]}]
+      ["/stats" {:name :agent/stats, :views [stats/stats]}]]]]])
+
+(defui ViewStack []
+  (let [match (state/use-sub [:route])
+        ;; Get the stack of views to render from the route data.
+        ;; Defaults to an empty vector if no views are defined for the route.
+        view-stack (get-in match [:data :views] [])
+        path-params (:path-params match)]
+    ;; Render the views as siblings inside a single div.
+    ;; Each view component is responsible for subscribing to the parts
+    ;; of the app-db it needs, including the route data itself.
+    ($ :div.flex-1.overflow-auto
+       (if (seq view-stack)
+         (for [view-component view-stack]
+           ($ view-component (merge {:key (str view-component) ;; React needs a key for lists
+                                     :match match}
+                                    path-params)))
+         ;; Render a fallback if no views are matched
+         ($ :div.p-8.text-center "Route not found or has no associated view.")))))
+
+(defui main-layout []
+  ($ :div.flex.h-screen.bg-gray-50
+     ($ sidebar-nav)
+     ($ :div.flex-1.flex.flex-col.min-h-0
+        ($ breadcrumb)
+        ($ :div.flex-1.overflow-auto
+           ($ ViewStack))
+        ($ global-modal-component))))
+
+(defonce router-instance (atom nil))
+
+(defui with-router [{:keys [routes children]}]
+  (let [router (uix/use-memo #(rf/router routes {:data {:coercion malli/coercion}}) [routes])]
+    (uix/use-effect
+     #(do
+        (reset! router-instance router)
+        (rfe/start! router
+                    (fn [new-match] (state/dispatch [:route/navigated new-match]))
+                    {:use-fragment false}))
+     [router])
+    ($ :<> children)))
+
+;; =============================================================================
+;; NAVIGATION COMPONENTS
+;; =============================================================================
+
+;; Reusable nav-link component (changed from wouter/Link to anchor tag)
 (defui nav-link [{:keys [href location collapsed? title children]}]
   (let [is-active? (or (= location href)
                        (and (not= href "/") (.startsWith location href)))
-        link-classes (str "flex items-center rounded-md transition-colors text-sm font-medium "
-                          (if collapsed?
-                            "justify-center p-2 w-10 h-10"
-                            "px-3 py-2")
-                          (if is-active?
-                            " bg-gray-300 text-gray-900"
-                            " hover:bg-gray-200 text-gray-700"))]
-    ($ Link {:href href :className link-classes :title (when collapsed? title)}
+        link-classes (common/cn
+                      "flex items-center rounded-md transition-colors text-sm font-medium"
+                      {"justify-center p-2 w-10 h-10" collapsed?
+                       "px-3 py-2" (not collapsed?)}
+                      {"bg-gray-300 text-gray-900" is-active?
+                       "hover:bg-gray-200 text-gray-700" (not is-active?)})]
+    ($ :a {:href href :className link-classes :title (when collapsed? title)}
        (if collapsed?
          (first children) ; Only show the icon when collapsed
-         children)))) ; Show icon and label ; Show icon and label ; Show icon and label 
+         children)))) ; Show icon and label
 
 ;; Agent-specific navigation component
 (defui agent-context-nav [{:keys [module-id agent-name collapsed?]}]
-  (let [[location _] (useLocation)]
-    ($ :<>
-       ($ :div.border-t.border-gray-300.my-3.pt-3.space-y-2
-          (when-not collapsed?
-            ($ :div.px-3.text-xs.font-semibold.text-gray-500 "MODULE"))
+  (let [location (or (get-in (state/use-sub [:route]) [:path]) "/")]
+    ($ :div.border-t.border-gray-300.my-3.pt-3.space-y-2
+       (when-not collapsed?
+         ($ :div.px-3.text-xs.font-semibold.text-gray-500 "AGENT"))
 
-          ($ nav-link {:href (str "/agents/" module-id "/" agent-name "/datsets")
-                       :location location :collapsed? collapsed? :title "Datasets"}
-             ($ ChartBarIcon {:className "h-5 w-5 flex-shrink-0"})
-             (when-not collapsed? ($ :span.ml-3 "Datasets")))
+       ($ nav-link {:href (str "/agents/" (common/url-encode module-id) "/agent/" (common/url-encode agent-name) "/invocations")
+                    :location location :collapsed? collapsed? :title "Invocations"}
+          ($ RectangleStackIcon {:className "h-5 w-5 flex-shrink-0"})
+          (when-not collapsed? ($ :span.ml-3 "Invocations")))
 
-          ($ nav-link {:href (str "/agents/" module-id "/" agent-name "/evaluations")
-                       :location location :collapsed? collapsed? :title "Evaluations"}
-             ($ BeakerIcon {:className "h-5 w-5 flex-shrink-0"})
-             (when-not collapsed? ($ :span.ml-3 "Evaluations"))))
+       ($ nav-link {:href (str "/agents/" (common/url-encode module-id) "/agent/" (common/url-encode agent-name) "/config")
+                    :location location :collapsed? collapsed? :title "Config"}
+          ($ Cog6ToothIcon {:className "h-5 w-5 flex-shrink-0"})
+          (when-not collapsed? ($ :span.ml-3 "Config"))))))
 
-       ($ :div.border-t.border-gray-300.my-3.pt-3.space-y-2
-          (when-not collapsed?
-            ($ :div.px-3.text-xs.font-semibold.text-gray-500 "AGENT"))
+;; Module-specific navigation component
+(defui module-context-nav [{:keys [module-id collapsed?]}]
+  (let [location (or (get-in (state/use-sub [:route]) [:path]) "/")
+        ;; Query for module-specific agents
+        {:keys [data loading? error]}
+        (queries/use-sente-query
+         {:query-key [:module-agents module-id]
+          :sente-event [:agents/get-for-module {:module-id module-id}]
+          :enabled? (boolean module-id)})]
+    ($ :div.border-t.border-gray-300.my-3.pt-3.space-y-2
+       (when-not collapsed?
+         ($ :div.px-3.text-xs.font-semibold.text-gray-500 "MODULE"))
 
-          ($ nav-link {:href (str "/agents/" module-id "/" agent-name "/invocations")
-                       :location location :collapsed? collapsed? :title "Invocations"}
-             ($ RectangleStackIcon {:className "h-5 w-5 flex-shrink-0"})
-             (when-not collapsed? ($ :span.ml-3 "Invocations")))
+       ($ nav-link {:href (rfe/href :module/datasets {:module-id module-id})
+                    :location location :collapsed? collapsed? :title "Datasets"}
+          ($ CircleStackIcon {:className "h-5 w-5 flex-shrink-0"})
+          (when-not collapsed? ($ :span.ml-3 "Datasets & Experiments")))
 
-          ($ nav-link {:href (str "/agents/" module-id "/" agent-name "/config")
-                       :location location :collapsed? collapsed? :title "Config"}
-             ($ Cog6ToothIcon {:className "h-5 w-5 flex-shrink-0"})
-             (when-not collapsed? ($ :span.ml-3 "Config")))))))
+       ($ nav-link {:href (str "/agents/" (common/url-encode module-id) "/evaluations")
+                    :location location :collapsed? collapsed? :title "Evaluations"}
+          ($ BeakerIcon {:className "h-5 w-5 flex-shrink-0"})
+          (when-not collapsed? ($ :span.ml-3 "Evaluators")))
+
+       ;; Module-specific agents list
+       (cond
+         ;; Show loading state
+         loading?
+         ($ :div.px-3.py-2.text-xs.text-gray-500.flex.items-center.gap-2
+            ($ common/spinner {:size :small})
+            (when-not collapsed? "Loading agents..."))
+
+         ;; Show error state
+         error
+         ($ :div.px-3.py-2.text-xs.text-red-500 {:title error}
+            (when-not collapsed? "Error loading agents"))
+
+         ;; Render the list of agents
+                  ;; Render the list of agents directly in MODULE section
+         (seq data)
+         (for [agent data
+               :let [decoded-agent-name (common/url-decode (:agent-name agent))]]
+           ($ nav-link {:key (:agent-name agent)
+                        :href (str "/agents/" (common/url-encode module-id) "/agent/" (:agent-name agent))
+                        :location location
+                        :collapsed? collapsed?
+                        :title decoded-agent-name}
+              ($ CpuChipIcon {:className "h-5 w-5 flex-shrink-0"})
+              (when-not collapsed?
+                ($ :span.ml-3.truncate decoded-agent-name))))))))
 
 (defui sidebar-nav []
-  (let [[location _] (useLocation)
-        ;; this is a hack, because wouter doesn't support useParams outside of Route components
-        ;; or nested routes. probably should switch to reitit or something.
-        url-segments (-> location
-                         (str/replace #"^/" "")
-                         (str/split #"/")
-                         vec)
-        ;; Extract agent context from URL: /agents/module-id/agent-name/...
-        [section module-id agent-name] url-segments
-        is-agent-context? (and (= section "agents") module-id agent-name)
+  (let [match (state/use-sub [:route])
+        location (or (:path match) "/")
+        {:keys [module-id agent-name]} (or (:path-params match) {})
+        route-name (get-in match [:data :name])
+        is-agent-context? (and module-id agent-name)
+        is-module-context? (and module-id (not agent-name))
         [collapsed? set-collapsed] (common/use-local-storage "sidebar-collapsed?" false)
         toggle-collapsed #(set-collapsed (not collapsed?))]
 
-    ($ :div {:className (str "h-screen flex flex-col bg-gray-100 transition-all duration-300 "
-                             (if collapsed? "w-16" "w-64"))}
+    ($ :div {:className (common/cn
+                         "h-screen flex flex-col bg-gray-100 transition-all duration-300"
+                         {"w-16" collapsed?, "w-64" (not collapsed?)})}
        ;; Header (no changes here)
        ($ :div.flex.items-center.justify-between.p-4.border-b.border-gray-200.overflow-hidden
           (when-not collapsed?
             ($ :img {:src "/logo-black.png"
                      :alt "Agent-O-Rama"
                      :className "h-8 max-w-48 object-contain"}))
+
           ($ :button {:onClick toggle-collapsed
                       :className "p-2 rounded-md hover:bg-gray-200 transition-colors"
                       :title (if collapsed? "Expand sidebar" "Collapse sidebar")}
@@ -96,68 +209,87 @@
                ($ ChevronLeftIcon {:className "h-5 w-5"}))))
 
        ;; Navigation
-       ($ :nav.flex-1.p-3
-          ;; Global Navigation (always visible)
+       ($ :nav.flex-1.p-3.overflow-y-auto
           ($ :div.space-y-2
              ($ nav-link {:href "/" :location location :collapsed? collapsed? :title "Overview"}
                 ($ HomeIcon {:className "h-5 w-5 flex-shrink-0"})
                 (when-not collapsed? ($ :span.ml-3 "Overview"))))
 
+          ;; Show MODULE section first when we have a module-id
+          (when module-id
+            ($ module-context-nav {:module-id module-id
+                                   :collapsed? collapsed?}))
+
+          ;; Then show AGENT section when we're in agent context
           (when is-agent-context?
             ($ agent-context-nav {:module-id module-id
                                   :agent-name agent-name
-                                  :collapsed? collapsed?}))
+                                  :collapsed? collapsed?}))))))
 
-          ;; TODO: You can add another section here for Datasets when a module-id is present but an agent-name is not.
-          ;; (when (and module-id (not agent-name))
-          ;;  ($ dataset-context-nav ...))
-          ))))
+;; =============================================================================
+;; BREADCRUMB COMPONENT
+;; =============================================================================
 
-;; Breadcrumb for sub-navigation within sections
 (defui breadcrumb []
-  (let [[location _] (useLocation)
-        segments (-> location
-                     (str/replace #"^/" "")
-                     (str/split #"/")
-                     vec)
+  (let [match (state/use-sub [:route])
+        {:keys [module-id agent-name dataset-id invoke-id]} (or (:path-params match) {})
+        route-name (get-in match [:data :name])
 
-        ;; Build breadcrumb items with proper merging for module/agent
-        build-breadcrumbs (fn [segments]
-                            (loop [remaining segments
-                                   result []
-                                   path ""]
-                              (if (empty? remaining)
-                                result
-                                (let [segment (first remaining)
-                                      next-segment (second remaining)
-                                      ;; Check if this is an agent module/agent-name pair
-                                      is-agent-pair? (and (= (get segments 0) "agents")
-                                                          (= (count result) 1)
-                                                          next-segment)
-                                      ;; Build the item
-                                      item (if is-agent-pair?
-                                             ;; Merge module/agent into one breadcrumb
-                                             {:label (str segment ":" next-segment)
-                                              :path (str path "/" segment "/" next-segment)
-                                              :segments-consumed 2}
-                                             ;; Regular breadcrumb
-                                             {:label (str/capitalize segment)
-                                              :path (str path "/" segment)
-                                              :segments-consumed 1})]
-                                  (recur (drop (:segments-consumed item) remaining)
-                                         (conj result item)
-                                         (:path item))))))
+        ;; Build breadcrumb items based on current route
+        build-breadcrumbs (fn []
+                            (let [items []]
+                              (cond
+                                ;; Agent invocation detail
+                                (and module-id agent-name invoke-id)
+                                [{:label (str (common/url-decode module-id) ":" (common/url-decode agent-name))
+                                  :path (str "/agents/" (common/url-encode module-id) "/agent/" (common/url-encode agent-name))}
+                                 {:label "Invocations"
+                                  :path (str "/agents/" (common/url-encode module-id) "/agent/" (common/url-encode agent-name) "/invocations")}
+                                 {:label (common/url-decode invoke-id)
+                                  :path nil}] ; Current page
 
-        breadcrumb-items (when (seq segments)
-                           (build-breadcrumbs segments))]
+                                ;; Agent detail pages
+                                (and module-id agent-name)
+                                [{:label (str (common/url-decode module-id) ":" (common/url-decode agent-name))
+                                  :path (str "/agents/" (common/url-encode module-id) "/agent/" (common/url-encode agent-name))}
+                                 {:label (case route-name
+                                           :agent/invocations "Invocations"
+                                           :agent/config "Config"
+                                           :agent/stats "Stats"
+                                           "Agent")
+                                  :path nil}] ; Current page
+
+                                ;; Dataset detail
+                                (and module-id dataset-id)
+                                [{:label (common/url-decode module-id)
+                                  :path (str "/agents/" (common/url-encode module-id))}
+                                 {:label "Datasets"
+                                  :path (str "/agents/" (common/url-encode module-id) "/datasets")}
+                                 {:label (common/url-decode dataset-id)
+                                  :path nil}] ; Current page
+
+                                ;; Module level pages
+                                (and module-id)
+                                [{:label (common/url-decode module-id)
+                                  :path (str "/agents/" (common/url-encode module-id))}
+                                 {:label (case route-name
+                                           :module/datasets "Datasets"
+                                           :module/evaluations "Evaluations"
+                                           "Module")
+                                  :path nil}] ; Current page
+
+                                ;; Default
+                                :else [])))
+
+        breadcrumb-items (build-breadcrumbs)]
 
     ($ :div.bg-gray-100.px-4.py-2.text-sm.text-gray-600
        ($ :div.flex.items-center.space-x-2
           ;; Home link (always present)
-          ($ Link {:href "/" :className "text-blue-600 hover:text-blue-800"} "Home")
+          ($ :a {:href "/" :className "text-blue-600 hover:text-blue-800"} "Home")
 
-          ;; Build breadcrumbs from segments
-          (when breadcrumb-items
+          ;; Build breadcrumbs
+          (when (seq breadcrumb-items)
             (map-indexed
              (fn [idx item]
                (let [is-last? (= idx (dec (count breadcrumb-items)))]
@@ -165,38 +297,26 @@
                   ;; Separator
                   ($ :span {:key (str "sep-" idx)} " › ")
                   ;; Link or text
-                  (if is-last?
+                  (if (and (:path item) (not is-last?))
+                    ;; Clickable link
+                    ($ :a {:key (str "crumb-" idx)
+                           :href (:path item)
+                           :className "text-blue-600 hover:text-blue-800"}
+                       (:label item))
                     ;; Current page - not clickable
                     ($ :span {:key (str "crumb-" idx) :className "text-gray-500"}
-                       (common/url-decode (:label item)))
-                    ;; Clickable link
-                    ($ Link {:key (str "crumb-" idx)
-                             :href (:path item)
-                             :className "text-blue-600 hover:text-blue-800"}
-                       (common/url-decode (:label item)))))))
+                       (:label item))))))
              breadcrumb-items))))))
 
- ;; Main app component
-(defui app []
-  ($ Router
-     ($ :div.flex.h-screen.bg-gray-50
-        ($ sidebar-nav)
-        ($ :div.flex-1.flex.flex-col.min-h-0
-           ($ breadcrumb)
-           ($ :div.flex-1.overflow-auto
-              ;; Agent routes
-              ($ Route {:path "/agents/:module-id/:agent-name/invocations" :component agents/invocations})
-              ($ Route {:path "/agents/:module-id/:agent-name/invocations/:invoke-id" :component agents/invoke})
-              ($ Route {:path "/agents/:module-id/:agent-name/evaluations" :component agents/evaluations})
-              ($ Route {:path "/agents/:module-id/:agent-name/config" :component config-page/config-page})
-              ($ Route {:path "/agents/:module-id/:agent-name/stats" :component stats/stats})
-              ($ Route {:path "/agents/:module-id/:agent-name" :component agents/agent})
-              ($ Route {:path "/agents" :component agents/index})
+;; =============================================================================
+;; ROUTER COMPONENT FOR NESTED ROUTES
+;; =============================================================================
 
-              ;; Home route
-              ($ Route {:path "/" :component agents/index}))))
-     ;; Global modal component
-     ($ global-modal-component)))
+;; =============================================================================
+;; MAIN APP COMPONENT
+;; =============================================================================
+
+(defui app [] ($ with-router {:routes routes} ($ main-layout)))
 
 (defn init []
   (sente/init!)

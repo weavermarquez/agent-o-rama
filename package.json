@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "devDependencies": {
+    "@playwright/test": "^1.55.0",
     "shadow-cljs": "3.0.5"
   },
   "dependencies": {
@@ -16,6 +17,6 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "uplot": "^1.6.30",
-    "wouter": "^3.7.0"
+    "use-debounce": "^10.0.4"
   }
 }

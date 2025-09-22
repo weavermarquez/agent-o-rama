@@ -1,11 +1,33 @@
 (ns com.rpl.agent-o-rama.ui.state
   (:require
    [com.rpl.specter :as s]
-   [uix.core :as uix]))
+   [uix.core :as uix]
+   [com.rpl.agent-o-rama.ui.common :as common]
+   [clojure.string :as str]))
 
 ;; =============================================================================
 ;; APP-DB: The Single Source of Truth
 ;; =============================================================================
+
+;; =============================================================================
+;; FORM VALIDATORS (defined here to avoid circular dependencies)
+;; =============================================================================
+
+(def required
+  "Validator for required fields"
+  (fn [value]
+    (when (str/blank? value)
+      "This field is required")))
+
+(def valid-json
+  "Validator for JSON strings"
+  (fn [value]
+    (when-not (str/blank? value)
+      (try
+        (js/JSON.parse value)
+        nil ; Valid JSON
+        (catch js/Error e
+          (str "Invalid JSON: " (.-message e)))))))
 
 (def initial-db
   {:current-invocation {:invoke-id nil
@@ -17,6 +39,8 @@
                  :has-more? true
                  :loading? false}
    :queries {} ; New map to store all query states
+   :route nil ; Current route match from reitit
+   :forms {} ; Form states keyed by form-id -> {:fields {} :valid? false :submitting? false :error nil :submit-event [...]}
    :ui {:selected-node-id nil
         :forking-mode? false
         :changed-nodes {}
@@ -24,15 +48,25 @@
         :current-route "/"
         :breadcrumbs []
         :modal {:active nil ;; nil or modal type keyword
-                :data {}} ;; modal-specific data
+                :data {} ;; modal-specific data
+                :form {:submitting? false
+                       :error nil}}
         :hitl {:responses {} ;; Keyed by invoke-id -> response text
-               :submitting {}}}
+               :submitting {}}
+        :datasets {:selected-examples {} ;; Keyed by dataset-id -> set of example-ids
+                   :selected-snapshot-per-dataset {}}} ;; Keyed by dataset-id -> snapshot-name 
    :sente {:connected? false
            :connection-state {}}
    :session {:user-id nil
              :preferences {}}})
 
 (defonce app-db (atom initial-db))
+
+;; TODO disable with shado-cljs, for performance
+(add-watch app-db :console-logger
+           (fn [key atom old-state new-state]
+             ;; This runs on EVERY state change
+             (aset js/window "db" (clj->js new-state {:keyword-fn (fn [k] (str/replace (name k) "-" "_"))}))))
 
 ;; =============================================================================
 ;; EVENT SYSTEM
@@ -46,7 +80,9 @@
    that will be applied to the current app-db via s/multi-transform. Handlers
    may return nil to indicate no state change is needed."
   [event-id handler-fn]
-  (swap! event-handlers assoc event-id handler-fn))
+  (if (contains? @event-handlers event-id)
+    (println "⚠️ Event handler already registered for event:" event-id)
+    (swap! event-handlers assoc event-id handler-fn)))
 
 (defn dispatch
   "Dispatch an event to update app-db. Event is a vector [event-id & args].
@@ -63,7 +99,8 @@
           (when specter-path
             (swap! app-db #(s/multi-transform specter-path %))))
         (catch :default e
-          (println "💥 Error in event handler" event-id ":" e)))
+          (println "💥 Error in event handler" event-id ":" e)
+          (throw e)))
       (println "⚠️ No handler registered for event:" event-id))))
 
 ;; =============================================================================
@@ -238,21 +275,71 @@
                                       (cond-> (nil? (:data current-state))
                                         (assoc :status :error)))))])))
 
+(reg-event :query/invalidate
+           (fn [db {:keys [query-key-pattern]}]
+             ;; Find all query keys that match the pattern and mark them for refetch
+             ;; Supports nested query-key vectors stored under :queries as nested maps
+             (let [queries-path [:queries]
+                   current-queries (get-in @app-db queries-path {})
+                   ;; Collect all full query-key vectors under :queries (leaf maps contain :status)
+                   all-query-keys (letfn [(collect-keys [m prefix acc]
+                                            (reduce-kv
+                                             (fn [a k v]
+                                               (let [new-prefix (conj prefix k)]
+                                                 (cond
+                                                   (and (map? v) (contains? v :status))
+                                                   (conj a (vec new-prefix))
+
+                                                   (map? v)
+                                                   (collect-keys v new-prefix a)
+                                                   :else a)))
+                                             acc
+                                             m))]
+                                    (collect-keys current-queries [] []))
+                   matching-keys (filter
+                                  (fn [query-key]
+                                    (cond
+                                      ;; Case 1: Pattern is a keyword: match first segment
+                                      (keyword? query-key-pattern)
+                                      (= (first query-key) query-key-pattern)
+
+                                      ;; Case 2: Pattern is a vector: prefix match
+                                      (vector? query-key-pattern)
+                                      (and (>= (count query-key) (count query-key-pattern))
+                                           (= query-key-pattern (subvec query-key 0 (count query-key-pattern))))
+
+                                      ;; Case 3: Pattern is a function (for complex logic)
+                                      (fn? query-key-pattern)
+                                      (query-key-pattern query-key)
+
+                                      :else false))
+                                  all-query-keys)]
+               ;; Mark matching queries as stale by setting a flag (:should-refetch?)
+               (when (seq matching-keys)
+                 (apply s/multi-path
+                        (map (fn [query-key]
+                               (into (into queries-path query-key)
+                                     [:should-refetch? (s/terminal-val true)]))
+                             matching-keys))))))
+
+;; =============================================================================
+;; FORM STATE MANAGEMENT EVENTS
+;; =============================================================================
+
+;; =============================================================================
+;; ROUTING EVENTS
+;; =============================================================================
+
+(reg-event :route/navigated
+           (fn [db new-match]
+             [:route
+              (s/terminal-val
+               (s/transform
+                [:path-params s/MAP-VALS]
+                common/url-decode
+                new-match))]))
+
  ;; =============================================================================
-;; MODAL EVENTS
-;; =============================================================================
-
-(reg-event :modal/show
-           (fn [db modal-type modal-data]
-             [:ui :modal (s/terminal-val {:active modal-type
-                                          :data modal-data})]))
-
-(reg-event :modal/hide
-           (fn [db]
-             [:ui :modal (s/terminal-val {:active nil
-                                          :data {}})]))
-
-;; =============================================================================
 ;; DEBUGGING HELPERS
 ;; =============================================================================
 
@@ -270,3 +357,26 @@
   ([specter-path]
    (js/console.log "Value at path" specter-path ":"
                    (clj->js (s/select-one specter-path @app-db)))))
+
+ ;; Dataset selection event handlers
+(reg-event :datasets/toggle-selection
+           (fn [db {:keys [dataset-id example-id]}]
+             [:ui :datasets :selected-examples dataset-id
+              (s/terminal #(if (contains? % example-id)
+                             (disj % example-id)
+                             (conj (or % #{}) example-id)))]))
+
+(reg-event :datasets/toggle-all-selection
+           (fn [db {:keys [dataset-id example-ids-on-page select-all?]}]
+             [:ui :datasets :selected-examples dataset-id
+              (s/terminal #(if select-all?
+                             (into (or % #{}) example-ids-on-page)
+                             (apply disj (or % #{}) example-ids-on-page)))]))
+
+(reg-event :datasets/clear-selection
+           (fn [db {:keys [dataset-id]}]
+             [:ui :datasets :selected-examples (s/terminal #(dissoc % dataset-id))]))
+
+(reg-event :datasets/set-selected-snapshot
+           (fn [db {:keys [dataset-id snapshot-name]}]
+             [:ui :datasets :selected-snapshot-per-dataset dataset-id (s/terminal-val snapshot-name)]))

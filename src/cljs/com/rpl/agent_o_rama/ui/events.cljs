@@ -1,7 +1,9 @@
 (ns com.rpl.agent-o-rama.ui.events
   (:require [com.rpl.agent-o-rama.ui.sente :as sente]
             [com.rpl.agent-o-rama.ui.state :as state]
-            [com.rpl.specter :as s]))
+            [com.rpl.agent-o-rama.ui.common :as common]
+            [com.rpl.specter :as s]
+            [clojure.string :as str]))
 
 ;; Orchestration events that perform side-effects using sente helpers,
 ;; keeping React components pure.
@@ -59,10 +61,10 @@
                                                         (when (and agg-node-invoke-id
                                                                    (not (contains? emitted-ids agg-node-invoke-id))
                                                                    (contains? raw-nodes agg-node-invoke-id))
-                                                          
+
                                                           (when (not (contains? visited agg-node-invoke-id))
-                                                              (vswap! extra-visits-vol conj agg-node-invoke-id))
-                                                          
+                                                            (vswap! extra-visits-vol conj agg-node-invoke-id))
+
                                                           [{:id (str "implicit-" current-id "-" agg-node-invoke-id)
                                                             :source (str current-id)
                                                             :target (str agg-node-invoke-id)
@@ -108,7 +110,7 @@
 (state/reg-event :invocation/fetch-graph-page
                  (fn [db {:keys [invoke-id module-id agent-name leaves initial?]}]
                    (sente/request!
-                    [:api/fetch-graph-page
+                    [:invocations/get-graph-page
                      {:invoke-id invoke-id
                       :module-id module-id
                       :agent-name agent-name
@@ -152,7 +154,7 @@
                      (when (contains? page-data :is-complete)
                        (state/dispatch [:db/set-value [:invocations-data invoke-id :is-complete] is-complete]))
 
-                     ;; Then merge the new nodes into the existing graph.
+;; Then merge the new nodes into the existing graph.
                      (when (and nodes (seq nodes))
                        (state/dispatch [:invocation/merge-nodes invoke-id nodes root-invoke-id]))
 
@@ -169,7 +171,7 @@
                          (state/dispatch [:invocation/fetch-graph-page
                                           (assoc current-invocation :leaves (vec next-leaves) :initial? false)]))
 
-                       ;; Otherwise, schedule a slow poll.
+;; Otherwise, schedule a slow poll.
                        :else
                        (do
                          (println "[POLLING-STATELESS] Scheduling delayed re-poll...")
@@ -232,7 +234,7 @@
                    (state/dispatch [:db/set-value [:ui :hitl :submitting (s/keypath (:invoke-id request))] true])
 
                    (sente/request!
-                    [:api/provide-human-input
+                    [:invocations/provide-human-input
                      {:module-id module-id
                       :agent-name agent-name
                       :invoke-id invoke-id
@@ -257,16 +259,69 @@
                      (state/dispatch [:db/set-value state-path {:submitting? true :error nil}])
 
                      (sente/request!
-                      [:api/set-agent-config {:module-id module-id :agent-name agent-name :key key :value value}]
+                      [:config/set {:module-id module-id :agent-name agent-name :key key :value value}]
                       10000 ;; 10 second timeout
                       (fn [reply]
                         (if (:success reply)
                           (do
                             (println "Config update success for" key)
-                            (state/dispatch [:db/set-value state-path {:submitting? false :error nil}])
-                            (when on-success (on-success)))
+                            (state/dispatch [:db/set-value state-path {:submitting? false :error nil}]))
                           (do
                             (js/console.error "Config update failed:" (:error reply))
                             (state/dispatch [:db/set-value state-path {:submitting? false :error (:error reply)}])
                             (when on-error (on-error (:error reply))))))))
-                   nil)) ; No immediate state change
+                   nil))
+
+ ;; =============================================================================
+;; DATASET FORM EVENTS
+;; =============================================================================
+
+(state/reg-event :dataset/edit-example
+                 (fn [db {:keys [module-id dataset-id snapshot-name example-id form-fields]}]
+                   (let [input (get form-fields :input "")
+                         output (get form-fields :output "")
+                         form-id :edit-example]
+
+                     (try
+                       (when-not (str/blank? input) (js/JSON.parse input))
+                       (when-not (str/blank? output) (js/JSON.parse output))
+
+                       (sente/request!
+                        [:datasets/edit-example {:module-id module-id
+                                                 :dataset-id dataset-id
+                                                 :snapshot-name snapshot-name
+                                                 :example-id example-id
+                                                 :input input
+                                                 :output output}]
+                        10000
+                        (fn [reply]
+                          (state/dispatch [:form/set-submitting form-id false])
+                          (if (:success reply)
+                            (do
+                              (state/dispatch [:modal/hide])
+                              (state/dispatch [:query/invalidate {:query-key-pattern [:dataset-examples module-id dataset-id snapshot-name]}])
+                              (state/dispatch [:form/clear form-id]))
+                            (state/dispatch [:form/set-error form-id (or (:error reply) "An unknown server error occurred.")]))))
+                       (catch js/Error e
+                         (state/dispatch [:form/set-submitting form-id false])
+                         (state/dispatch [:form/set-error form-id (str "Invalid JSON: " (.-message e))]))))
+                   nil))
+;; =============================================================================
+;; BULK OPERATION EVENTS
+;; =============================================================================
+
+(state/reg-event :dataset/delete-selected
+                 (fn [db {:keys [module-id dataset-id snapshot-name example-ids]}]
+                   (sente/request!
+                    [:datasets/delete-examples {:module-id module-id
+                                                :dataset-id dataset-id
+                                                :snapshot-name snapshot-name
+                                                :example-ids (vec example-ids)}]
+                    15000
+                    (fn [reply]
+                      (if (:success reply)
+                        (do
+                          (state/dispatch [:datasets/clear-selection {:dataset-id dataset-id}])
+                          (state/dispatch [:query/invalidate {:query-key-pattern [:dataset-examples module-id dataset-id snapshot-name]}]))
+                        (js/alert (str "Failed to delete examples: " (:error reply))))))
+                   nil))

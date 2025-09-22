@@ -4,7 +4,7 @@
    [com.rpl.agent-o-rama.ui.agent-graph :as agent-graph]
 
    [uix.core :as uix :refer [defui defhook $]]
-   ["wouter" :as wouter :refer [useLocation]]
+   [reitit.frontend.easy :as rfe]
 
    [com.rpl.agent-o-rama.ui.common :as common]
    [com.rpl.agent-o-rama.ui.state :as state]
@@ -29,14 +29,14 @@
   (let [task-id (:task-id invoke)
         agent-id (:agent-id invoke)
         start-time (:start-time-millis invoke)
-        url (str "/agents/" module-id "/" agent-name "/invocations/" task-id "-" agent-id)]
+        href (str "/agents/" (common/url-encode module-id) "/agent/" (common/url-encode agent-name) "/invocations/" task-id "-" agent-id)
+        invoke-id (str task-id "-" agent-id)]
     ($ :tr.hover:bg-gray-50.transition-colors.duration-150.cursor-pointer
-       {:key url
+       {:key href
         :onClick (fn [e]
-                   (when on-click
-                     (. e stopPropagation)
-                     (on-click url)))}
-       ($ :td.px-4.py-3.font-mono.text-blue-600.font-medium (str task-id "-" agent-id))
+                   (. e stopPropagation)
+                   (rfe/push-state :agent/invocation-detail {:module-id module-id :agent-name agent-name :invoke-id invoke-id}))}
+       ($ :td.px-4.py-3.font-mono.text-blue-600.font-medium invoke-id)
        ($ :td.px-4.py-3.text-sm.text-gray-600.font-mono
           {:title (common/format-timestamp start-time)}
           (common/format-relative-time start-time))
@@ -49,36 +49,41 @@
                            :human-request? (:human-request? invoke)})))))
 
 (defui index []
-  ;; The entire complex useEffect is replaced by this single line!
   (let [{:keys [data loading? error]}
         (queries/use-sente-query {:query-key [:agents]
-                                  :sente-event [:api/get-agents]
+                                  :sente-event [:agents/get-all]
                                   :refetch-interval-ms 2000})]
 
     (cond
-      ;; Still loading initial data
       loading? ($ :div.flex.justify-center.items-center.py-8
                   ($ :div.text-gray-500 "Loading agents via Sente..."))
-      ;; Request errored
       error ($ :div.flex.justify-center.items-center.py-8
                ($ :div.text-red-500 "Error loading agents: " error))
-      ;; No agents returned from the API
       (empty? data) ($ :div.flex.justify-center.items-center.py-8
                        ($ :div.text-gray-500 "No agents found"))
       :else ($ :div.p-4
-               (for [agent data
-                     :let [url (str "/agents/" (:module-id agent) "/" (:agent-name agent))]]
-                 ($ :div.p-4.transition-colors.duration-150.hover:bg-gray-200.bg-gray-100.m-4 {:key url}
-                    ($ wouter/Link {:href url}
-                       ($ :div.flex.items-center.group
-                          ($ :div.flex-1
-                             ($ :div.text-lg.font-medium.text-indigo-600.group-hover:text-indigo-800
-                                ($ :div (common/url-decode (:module-id agent)) ":" (common/url-decode (:agent-name agent))))
-                             ($ :div.mt-1.text-sm.text-gray-500.group-hover:text-gray-700
-                                "View agent details"))))))))))
+               ($ :div {:className (:container common/table-classes)}
+                  ($ :table {:className (:table common/table-classes)}
+                     ($ :thead {:className (:thead common/table-classes)}
+                        ($ :tr
+                           ($ :th {:className (:th common/table-classes)} "Module")
+                           ($ :th {:className (:th common/table-classes)} "Agent")))
+                     ($ :tbody
+                        (into []
+                              (for [agent data
+                                    :let [module (common/url-decode (:module-id agent))
+                                          agent-name (common/url-decode (:agent-name agent))
+                                          href (str "/agents/" (common/url-encode (:module-id agent)) "/agent/" (common/url-encode (:agent-name agent)))]]
+                                ($ :tr {:key href :className "hover:bg-gray-50 cursor-pointer"
+                                        :onClick (fn [_]
+                                                   (rfe/push-state :agent/detail
+                                                                   {:module-id (:module-id agent)
+                                                                    :agent-name (:agent-name agent)}))}
+                                   ($ :td {:className (:td common/table-classes)} module)
+                                   ($ :td {:className (:td common/table-classes)} agent-name)))))))))))
 
 (defui invocations []
-  (let [{:strs [module-id agent-name]} (js->clj (wouter/useParams))
+  (let [{:keys [module-id agent-name]} (state/use-sub [:route :path-params])
 
         ;; Subscribe to invocations state from app-db
         all-invokes (state/use-sub [:invocations :all-invokes])
@@ -87,32 +92,33 @@
         loading? (state/use-sub [:invocations :loading?])
         connected? (state/use-sub [:sente :connected?])
 
-        [location navigate] (useLocation)
-
-        ;; Fetch function that handles the entire flow
-        fetch-invocations (fn [pagination append?]
-                            (state/dispatch [:invocations/set-loading true])
-                            (sente/request!
-                             [:api/get-invocations {:module-id module-id
-                                                    :agent-name agent-name
-                                                    :pagination pagination}]
-                             5000
-                             (fn [reply]
-                               (state/dispatch [:invocations/set-loading false])
-                               (when (:success reply)
-                                 (let [data (:data reply)
-                                       new-invokes (:agent-invokes data)
-                                       new-pagination (:pagination-params data)
-                                       has-more? (and new-pagination
-                                                      (not (empty? new-pagination))
-                                                      (some (fn [[_ item-id]] (not (nil? item-id)))
-                                                            new-pagination))]
-                                   (if append?
-                                     (state/dispatch [:invocations/append new-invokes])
-                                     (state/dispatch [:db/set-value [:invocations :all-invokes] new-invokes]))
-                                   (state/dispatch [:invocations/set-pagination
-                                                    {:pagination-params (when has-more? new-pagination)
-                                                     :has-more? has-more?}]))))))
+        ;; Fetch function that handles the entire flow - memoized with use-callback
+        fetch-invocations (uix/use-callback
+                           (fn [pagination append?]
+                             (state/dispatch [:invocations/set-loading true])
+                             (sente/request!
+                              [:invocations/get-page {:module-id module-id
+                                                      :agent-name agent-name
+                                                      :pagination pagination}]
+                              5000
+                              (fn [reply]
+                                (state/dispatch [:invocations/set-loading false])
+                                (when (:success reply)
+                                  (let [data (:data reply)
+                                        new-invokes (:agent-invokes data)
+                                        new-pagination (:pagination-params data)
+                                        has-more? (and new-pagination
+                                                       (not (empty? new-pagination))
+                                                       (some (fn [[_ item-id]] (not (nil? item-id)))
+                                                             new-pagination))]
+                                    (if append?
+                                      (state/dispatch [:invocations/append new-invokes])
+                                      (state/dispatch [:db/set-value [:invocations :all-invokes] new-invokes]))
+                                    (state/dispatch [:invocations/set-pagination
+                                                     {:pagination-params (when has-more? new-pagination)
+                                                      :has-more? has-more?}]))))))
+                            ;; Dependencies for use-callback - only recreate when module-id or agent-name changes
+                           [module-id agent-name])
 
         ;; Initial load - fetch first page when connected
         _ (uix/use-effect
@@ -122,7 +128,8 @@
                (state/dispatch [:invocations/reset])
                (fetch-invocations {} false))
              (constantly nil))
-           [module-id agent-name connected?])
+           ;; Simplified dependencies - fetch-invocations is now stable and will change when module-id/agent-name change
+           [fetch-invocations connected?])
 
         load-more (fn []
                     (when (and has-more? (not loading?) pagination-params)
@@ -153,7 +160,7 @@
                                        :invoke invoke
                                        :module-id module-id
                                        :agent-name agent-name
-                                       :on-click navigate})))
+                                       :on-click (fn [url] (set! (.-href (.-location js/window)) url))})))
 
             ;; Load More button
                (when has-more?
@@ -170,15 +177,13 @@
                                             :clipRule "evenodd"}))))))))))))))
 
 (defui mini-invocations []
-  (let [{:strs [module-id agent-name]} (js->clj (wouter/useParams))
+  (let [{:keys [module-id agent-name]} (state/use-sub [:route :path-params])
         {:keys [data loading? error]}
         (queries/use-sente-query {:query-key [:mini-invocations module-id agent-name]
-                                  :sente-event [:api/get-invocations {:module-id module-id
-                                                                      :agent-name agent-name
-                                                                      :pagination {}}]
-                                  :refetch-interval-ms 2000})
-
-        [location navigate] (useLocation)]
+                                  :sente-event [:invocations/get-page {:module-id module-id
+                                                                       :agent-name agent-name
+                                                                       :pagination {}}]
+                                  :refetch-interval-ms 2000})]
     (cond
       loading? ($ :div.flex.justify-center.items-center.py-8
                   ($ :div.text-gray-500 "Loading invocations via Sente..."))
@@ -202,10 +207,12 @@
                                     :invoke invoke
                                     :module-id module-id
                                     :agent-name agent-name
-                                    :on-click (fn [url] (navigate url))})))
+                                    :on-click (fn [url] (set! (.-href (.-location js/window)) url))})))
             ($ :tfoot.bg-gray-50.border-t.border-gray-200
                ($ :tr.hover:bg-gray-100.transition-colors.duration-150
-                  {:onClick (fn [_] (navigate (str "/agents/" module-id "/" agent-name "/invocations")))}
+                  {:onClick (fn [_]
+                              (set! (.-href (.-location js/window))
+                                    (str "/agents/" (common/url-encode module-id) "/agent/" (common/url-encode agent-name) "/invocations")))}
                   ($ :td.px-4.py-3.cursor-pointer {:colSpan 5}
                      ($ :div.flex.justify-center.items-center.text-gray-600.hover:text-gray-800.transition-colors.duration-150
                         ($ :span.mr-2.text-sm.font-medium "View all invocations")
@@ -215,17 +222,17 @@
                                      :clipRule "evenodd"})))))))))))
 
 (defui evaluations []
-  (let [{:strs [module-id agent-name]} (js->clj (wouter/useParams))]
+  (let [{:keys [module-id agent-name]} (state/use-sub [:route :path-params])]
     ($ :div
        ($ :h2.text-xl.font-semibold.mb-4 "Evaluations")
        ($ :div.text-gray-500 "Evaluations functionality coming soon..."))))
 
 (defui agent-graph []
-  (let [{:strs [module-id agent-name]} (js->clj (wouter/useParams))
+  (let [{:keys [module-id agent-name]} (state/use-sub [:route :path-params])
         {:keys [data loading? error]}
         (queries/use-sente-query {:query-key [:graph module-id agent-name]
-                                  :sente-event [:api/get-graph {:module-id module-id
-                                                                :agent-name agent-name}]
+                                  :sente-event [:invocations/get-graph {:module-id module-id
+                                                                        :agent-name agent-name}]
                                   :refetch-interval-ms 2000})]
     (cond
       loading? ($ :div.flex.justify-center.items-center.py-8
@@ -239,8 +246,8 @@
 
 (defui stats-summary [{:keys [module-id agent-name]}]
   ($ :div.p-4.flex.gap-1
-     ($ wouter/Link
-        {:href (str "/agents/" module-id "/" agent-name "/stats")
+     ($ :a
+        {:href (str "/agents/" (common/url-encode module-id) "/agent/" (common/url-encode agent-name) "/stats")
          :style {:flex-grow "1"}}
         ($ :div.bg-white.rounded-md.border.border-gray-200.shadow-sm.flex-1.p-6.hover:shadow-md.transition-shadow.duration-150.cursor-pointer.relative
            ($ :div.flex.justify-between.items-start
@@ -264,8 +271,8 @@
                       {:metric "Latency" :value "847ms" :threshold "< 500ms" :time-ago "4h ago"}
                       {:metric "Error Rate" :value "8.1%" :threshold "< 5%" :time-ago "1d ago"}]]
     ($ :div.p-4.flex.gap-1
-       ($ wouter/Link
-          {:href (str "/agents/" module-id "/" agent-name "/alerts")
+       ($ :a
+          {:href (str "/agents/" (common/url-encode module-id) "/agent/" (common/url-encode agent-name) "/alerts")
            :style {:flex-grow "1"}}
           ($ :div.bg-white.rounded-md.border.border-gray-200.shadow-sm.flex-1.p-6.hover:shadow-md.transition-shadow.duration-150.cursor-pointer.relative
              ($ :div.flex.justify-between.items-start
@@ -291,8 +298,6 @@
         loading? (or (:loading? manual-run-state) false)
         error-msg (:error-msg manual-run-state)
 
-        [location navigate] (useLocation)
-
         ;; State update helper
         update-field (fn [field value]
                        (state/dispatch [:db/set-value [:ui :manual-run module-id agent-name field] value]))
@@ -310,18 +315,17 @@
                           (if parsed-args
                             ;; Make Sente request
                             (sente/request!
-                             [:api/run-agent {:module-id module-id
-                                              :agent-name agent-name
-                                              :args parsed-args}]
+                             [:invocations/run-agent {:module-id module-id
+                                                      :agent-name agent-name
+                                                      :args parsed-args}]
                              5000
                              (fn [reply]
                                (update-field :loading? false)
                                (if (:success reply)
                                  (let [data (:data reply)
-                                       trace-url (str "/agents/" module-id "/" agent-name "/invocations/"
-                                                      (:task-id data) "-" (:invoke-id data))]
+                                       trace-url (str "/agents/" (common/url-encode module-id) "/agent/" (common/url-encode agent-name) "/invocations/" (:task-id data) "-" (:invoke-id data))]
                                    (update-field :args "") ;; Clear args on success
-                                   (navigate trace-url))
+                                   (rfe/push-state :agent/invocation-detail {:module-id module-id :agent-name agent-name :invoke-id (str (:task-id data) "-" (:invoke-id data))}))
                                  (update-field :error-msg (str "Error: " (or (:error reply) "Unknown error"))))))
                             ;; Invalid JSON
                             (do
@@ -352,8 +356,7 @@
             ($ :div.text-red-700.text-sm error-msg))))))
 
 (defui agent []
-  (let [{:strs [module-id agent-name]} (js->clj (wouter/useParams))
-        [location navigate] (useLocation)]
+  (let [{:keys [module-id agent-name]} (state/use-sub [:route :path-params])]
 
     ($ :div.p-4
        ($ :div.text-xl.font-semibold.mb-4 "Agent Details")
@@ -371,7 +374,7 @@
           ($ mini-invocations)))))
 
 (defui invoke []
-  (let [{:strs [module-id agent-name invoke-id]} (js->clj (wouter/useParams))]
+  (let [{:keys [module-id agent-name invoke-id]} (state/use-sub [:route :path-params])]
 
     ($ :div
        ;; Sticky header with all controls
@@ -382,5 +385,3 @@
        ;; Graph content
        ($ :div.bg-white.p-6.rounded-lg.shadow.mt-4
           ($ invocation-page/invocation-page)))))
-
-

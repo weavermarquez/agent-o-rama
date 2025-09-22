@@ -7,17 +7,13 @@
    [com.rpl.agent-o-rama.ui.sente :as sente]
    [com.rpl.agent-o-rama.ui.common :as common]
    [com.rpl.specter :as s]
-   ["wouter" :refer [useParams useLocation]]))
+   [reitit.frontend.easy :as rfe]))
 
 (defui invocation-page []
-  (let [{:strs [module-id agent-name invoke-id]} (js->clj (useParams))
-        [location set-location] (useLocation)
+  (let [{:keys [module-id agent-name invoke-id]} (state/use-sub [:route :path-params])
 
-        ;; 1. Subscribe to all necessary state from app-db
-                ;; 1. Subscribe to the entire invocation state object
         invocation-state (state/use-sub [:invocations-data invoke-id])
 
-        ;; 2. Destructure the state with defaults
         {:keys [status graph summary next-leaves is-complete implicit-edges
                 root-invoke-id task-id forks fork-of error]}
         (or invocation-state {:status :loading})
@@ -63,7 +59,7 @@
         handle-execute-fork (fn []
                               (when (not (empty? changed-nodes))
                                 (sente/request!
-                                 [:api/execute-fork
+                                 [:invocations/execute-fork
                                   {:module-id module-id
                                    :agent-name agent-name
                                    :invoke-id invoke-id
@@ -72,10 +68,10 @@
                                  (fn [reply]
                                    (if (:success reply)
                                      (let [{:keys [task-id agent-invoke-id]} (:data reply)
-                                           new-path (str "/agents/" module-id "/" agent-name
+                                           new-path (str "/agents/" (common/url-encode module-id) "/agent/" (common/url-encode agent-name)
                                                          "/invocations/" task-id "-" agent-invoke-id)]
                                        (state/dispatch [:ui/clear-fork-state])
-                                       (set-location new-path))
+                                       (rfe/push-state :agent/invocation-detail {:module-id module-id :agent-name agent-name :invoke-id (str task-id "-" agent-invoke-id)}))
                                      (js/console.error "Fork failed:" (:error reply)))))))
 
         handle-clear-fork (fn []
@@ -90,23 +86,7 @@
         handle-toggle-forking-mode (fn []
                                      (state/dispatch [:ui/toggle-forking-mode]))
 
-        handle-paginate-node (fn [missing-node-id]
-                               ;; Only allow pagination for complete invocations
-                               (when is-complete
-                                 (sente/request!
-                                  [:api/paginate-node
-                                   {:module-id module-id
-                                    :agent-name agent-name
-                                    :invoke-id invoke-id
-                                    :missing-node-id missing-node-id}]
-                                  5000
-                                  (fn [reply]
-                                    (when (:success reply)
-                                      ;; Extract nodes from paginated response format
-                                      (let [{:keys [invokes-map]} (:data reply)]
-                                        (state/dispatch [:invocation/merge-nodes
-                                                         invoke-id
-                                                         invokes-map])))))))
+        handle-paginate-node (fn [missing-node-id] :todo)
 
         ;; Prepare the data for the view
         view-props {:module-id module-id
