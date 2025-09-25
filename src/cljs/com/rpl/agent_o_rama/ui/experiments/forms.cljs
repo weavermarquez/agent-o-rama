@@ -267,14 +267,9 @@
 
 (defui CreateExperimentForm [{:keys [form-id]}]
   (let [{:keys [module-id dataset-id]} (state/use-sub [:route :path-params])
-        ;; --- DELETED ---
-        ;; The query for snapshot names is no longer needed here.
-        ;; The SnapshotManager component will handle it.
 
         ;; Basic info fields
         name-field (forms/use-form-field form-id :name)
-        description-field (forms/use-form-field form-id :description)
-
         ;; Data selection fields
         snapshot-field (forms/use-form-field form-id :snapshot)
         selector-type-field (forms/use-form-field form-id [:selector :type])
@@ -295,14 +290,7 @@
               :on-change (:on-change name-field)
               :error (:error name-field)
               :required? true
-              :placeholder "e.g., Test new prompt for summary agent"})
-          ($ forms/form-field
-             {:label "Description (Optional)"
-              :type :textarea
-              :value (:value description-field)
-              :on-change (:on-change description-field)
-              :error (:error description-field)
-              :rows 3}))
+              :placeholder "e.g., Test new prompt for summary agent"}))
 
        ;; Data Selection Section
        ($ :div.mb-8
@@ -390,13 +378,13 @@
                 {:label "Number of Repetitions"
                  :type :number
                  :value (or (get form :num-repetitions) 1)
-                 :on-change #(state/dispatch [:form/update-field form-id :num-repetitions (js/parseInt (.. % -target -value))])
+                 :on-change #(state/dispatch [:form/update-field form-id :num-repetitions (js/parseInt %)])
                  :placeholder "1"})
              ($ forms/form-field
                 {:label "Concurrency Level"
                  :type :number
                  :value (or (get form :concurrency) 1)
-                 :on-change #(state/dispatch [:form/update-field form-id :concurrency (js/parseInt (.. % -target -value))])
+                 :on-change #(state/dispatch [:form/update-field form-id :concurrency (js/parseInt %)])
                  :placeholder "1"}))))))
 
 ;; =============================================================================
@@ -410,7 +398,6 @@
   {:initial-fields
    (fn [props]
      (let [base {:name ""
-                 :description ""
                  :snapshot ""
                  :selector {:type :all :tag ""}
                  :spec {:type :regular
