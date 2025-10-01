@@ -3,7 +3,7 @@
    [cljs.test :refer-macros [deftest testing is]]
    [com.rpl.agent-o-rama.ui.state :as state]
    [com.rpl.specter :as s]
-   [com.rpl.agent-o-rama.ui.dom])) ; Load DOM setup before tests
+   [com.rpl.agent-o-rama.ui.dom])); Load DOM setup before tests
 
 (deftest test-initial-db
   ;; Tests the initial-db structure to ensure critical keys exist and have expected shapes
@@ -38,11 +38,11 @@
   ;; Tests basic event registration and dispatch functionality
   (testing "reg-event"
     (testing "registers a new event handler"
-      (let [test-event-id ::test-event
+      (let [test-event-id  ::test-event
             handler-called (atom false)
-            handler-fn (fn [db & args]
-                         (reset! handler-called true)
-                         nil)] ; Return nil to indicate no state change
+            handler-fn     (fn [db & args]
+                             (reset! handler-called true)
+                             nil)] ; Return nil to indicate no state change
         (state/reg-event test-event-id handler-fn)
         (state/dispatch [test-event-id])
         (is @handler-called "Event handler should be called on dispatch")))))
@@ -52,12 +52,7 @@
   (testing ":db/set-value"
     (testing "sets a value at a simple path"
       ;; Remove and re-add the console-logger watch to avoid window reference issues
-      (remove-watch state/app-db :console-logger)
       (state/reset-db!)
-      (add-watch state/app-db :console-logger
-                 (fn [key atom old-state new-state]
-                   (when (exists? js/window)
-                     (aset js/window "db" (clj->js new-state {:keyword-fn (fn [k] (clojure.string/replace (name k) "-" "_"))})))))
       (state/dispatch [:db/set-value [:ui :selected-node-id] "test-node-123"])
       (is (= "test-node-123" (s/select-one [:ui :selected-node-id] (state/get-db)))))
 
@@ -72,10 +67,15 @@
     (testing "toggles forking mode from false to true"
       (remove-watch state/app-db :console-logger)
       (state/reset-db!)
-      (add-watch state/app-db :console-logger
+      (add-watch state/app-db
+                 :console-logger
                  (fn [key atom old-state new-state]
                    (when (exists? js/window)
-                     (aset js/window "db" (clj->js new-state {:keyword-fn (fn [k] (clojure.string/replace (name k) "-" "_"))})))))
+                     (aset js/window
+                           "db"
+                           (clj->js new-state
+                                    {:keyword-fn (fn [k]
+                                                   (clojure.string/replace (name k) "-" "_"))})))))
       (is (false? (s/select-one [:ui :forking-mode?] (state/get-db))))
       (state/dispatch [:ui/toggle-forking-mode])
       (is (true? (s/select-one [:ui :forking-mode?] (state/get-db)))))
