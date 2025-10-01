@@ -20,6 +20,24 @@ export async function getResearchAgentRow(page) {
 }
 
 /**
+ * Gets the agent row for the BasicAgentModule.
+ * @param {import('@playwright/test').Page} page - The Playwright page object.
+ * @returns {Promise<import('@playwright/test').Locator>} The agent row locator.
+ */
+export async function getBasicAgentRow(page) {
+  // Target the specific row by its exact role name
+  const agentRow = page.getByRole('row', { 
+    name: 'com.rpl.agent.basic.basic-agent/BasicAgentModule BasicAgent' 
+  });
+
+  // Wait up to 30 seconds for agents to appear on first load.
+  await expect(agentRow).toBeVisible({ timeout: 30000 });
+  console.log('Found BasicAgent row');
+
+  return agentRow;
+}
+
+/**
  * Creates an evaluator via the UI.
  * @param {import('@playwright/test').Page} page - The Playwright page object.
  * @param {Object} options - The evaluator creation options.
@@ -69,27 +87,70 @@ export async function createEvaluator(page, { name, builderName, description, pa
 /**
  * Adds an example to the currently viewed dataset.
  * @param {import('@playwright/test').Page} page - The Playwright page object.
- * @param {Object} example - An object with `input` and optional `output`.
+ * @param {Object} example - An object with `input`, optional `output`, and optional `tags` array.
  */
-export async function addExample(page, { input, output }) {
-  console.log('Adding example with input:', JSON.stringify(input));
-  // Click the first enabled Add Example button
+export async function addExample(page, { input, output, tags }) {
+  console.log('Adding example with input:', JSON.stringify(input), 'tags:', tags);
+  
+  // Step 1: Count existing rows before adding
+  const rowsBefore = await page.locator('table tbody tr').count();
+  console.log(`Rows before adding example: ${rowsBefore}`);
+  
+  // Step 2: Create the example
   await page.locator('button').filter({ hasText: 'Add Example' }).filter({ hasNot: page.locator('[disabled]') }).first().click();
 
-  const modal = page.locator('[role="dialog"]');
-  await expect(modal).toBeVisible();
-  await modal.getByLabel('Input (JSON)').fill(JSON.stringify(input, null, 2));
+  const createModal = page.locator('[role="dialog"]');
+  await expect(createModal).toBeVisible();
+  await createModal.getByLabel('Input (JSON)').fill(JSON.stringify(input, null, 2));
   
   if (output !== undefined) {
-    await modal.getByLabel('Output (JSON, Optional)').fill(JSON.stringify(output, null, 2));
+    await createModal.getByLabel('Output (JSON, Optional)').fill(JSON.stringify(output, null, 2));
   }
   
-  await modal.getByRole('button', { name: 'Add Example' }).click();
+  await createModal.getByRole('button', { name: 'Add Example' }).click();
+  await expect(createModal).not.toBeVisible({ timeout: 15000 });
 
-  await expect(modal).not.toBeVisible({ timeout: 15000 });
-  // Find the row that contains our input ID (JSON gets truncated in the table)
-  const rowWithId = page.locator('table tbody tr').filter({ hasText: input.id });
-  await expect(rowWithId).toBeVisible({ timeout: 10000 });
+  // Step 3: Wait for the new row to appear
+  await expect(async () => {
+    const rowsAfter = await page.locator('table tbody tr').count();
+    expect(rowsAfter).toBe(rowsBefore + 1);
+  }).toPass({ timeout: 10000 });
+  
+  const rowsAfter = await page.locator('table tbody tr').count();
+  console.log(`Rows after adding example: ${rowsAfter}`);
+
+  // Step 4: Target the newly added row (last row)
+  const newRow = page.locator('table tbody tr').nth(rowsAfter - 1);
+  await expect(newRow).toBeVisible();
+
+  // Step 5: If tags are provided, edit the example to add them
+  if (tags && tags.length > 0) {
+    // Click the newly added row
+    await newRow.click();
+
+    const editModal = page.locator('[role="dialog"]');
+    await expect(editModal).toBeVisible();
+    
+    // Add tags one by one
+    for (const tag of tags) {
+      await editModal.getByPlaceholder('Add a tag and press Enter...').fill(tag);
+      await editModal.getByPlaceholder('Add a tag and press Enter...').press('Enter');
+    }
+
+    const noTags = editModal.getByText('No tags', { exact: true })
+    await expect(noTags).not.toBeVisible();
+
+    for (const tag of tags) {
+      const tagRow = editModal.getByText(tag, { exact: true })
+      await expect(tagRow).toBeVisible();
+    }
+
+    const closeButton = editModal.getByRole('button', { name: '×' })
+    closeButton.click();
+    await expect(editModal).not.toBeVisible({ timeout: 15000 });
+    console.log('Successfully added tags to example.');
+  }
+  
   console.log('Successfully added example.');
 }
 

@@ -1,7 +1,7 @@
 (ns com.rpl.agent-o-rama.ui.experiments.regular-detail
   (:require
    [uix.core :as uix :refer [defui $]]
-   ["@heroicons/react/24/outline" :refer [ArrowLeftIcon PlayIcon ChevronDownIcon ChevronUpIcon]]
+   ["@heroicons/react/24/outline" :refer [ArrowLeftIcon PlayIcon ChevronDownIcon ChevronUpIcon ArrowTopRightOnSquareIcon]]
    [com.rpl.agent-o-rama.ui.common :as common]
    [com.rpl.agent-o-rama.ui.state :as state]
    [com.rpl.agent-o-rama.ui.queries :as queries]
@@ -130,22 +130,27 @@
      ($ :div.text-xs.font-medium.text-gray-500.uppercase.tracking-wider label)
      ($ :div.text-xl.font-semibold.text-gray-900.mt-1 value)))
 
-(defui SummaryEvaluatorCell [{:keys [eval-name metrics columns]}]
-  (let [eval-label (evaluators/identifier-title eval-name)
-        columns (or (seq columns)
-                    (evaluators/columns-for-evaluator
-                     (evaluators/collect-column-metadata {eval-name metrics})
-                     eval-name))]
-    ($ :td.px-4.py-3.border-b.border-gray-200
-       ($ :div.text-xs.font-medium.text-gray-500.uppercase.tracking-wider
-          (or eval-label (str eval-name)))
-       ($ :div.mt-1.space-y-1
-          (for [{:keys [metric-key label metric-label]} columns
-                :let [metric-value (get metrics metric-key)
-                      display-label (or label metric-label (evaluators/metric-title metric-key))]]
-            ($ :div.flex.justify-between.text-sm {:key (str eval-name "-" metric-key)}
-               ($ :span.text-gray-600 display-label)
-               ($ :span.font-semibold.text-gray-900.ml-2 (format-metric-value metric-value))))))))
+(defui SummaryEvaluatorsMetricsTable [{:keys [summary-evals]}]
+  (let [summary-metadata (evaluators/collect-column-metadata summary-evals)]
+    (when (seq (:columns summary-metadata))
+      ($ :div.overflow-x-auto.bg-white.rounded-lg.border.border-gray-200.shadow-sm
+         ($ :table.min-w-full
+            ($ :thead.bg-gray-50
+               ($ :tr
+                  (for [{:keys [column-key label]} (:columns summary-metadata)]
+                    ($ :th.px-4.py-3.text-left.text-xs.font-medium.text-gray-500.uppercase.tracking-wider.border-b.border-gray-200
+                       {:key column-key
+                        :title label}
+                       ($ :div.truncate label)))))
+            ($ :tbody
+               ($ :tr.hover:bg-gray-50
+                  (for [{:keys [column-key eval-name metric-key]} (:columns summary-metadata)]
+                    ($ :td.px-4.py-3.text-sm.text-gray-900.border-b.border-gray-200.text-center.font-mono
+                       {:key column-key}
+                       (let [value (get-in summary-evals [eval-name metric-key])]
+                         (format-metric-value value)))))))))))
+
+;; SummaryEvaluatorCell component removed - summary evaluators now displayed in their own table
 
 (defui SummaryStatsTable [{:keys [data]}]
   (let [;; --- Destructure all necessary data from the main `data` prop ---
@@ -153,7 +158,6 @@
         latency-stats (:latency-number-stats data)
         token-stats (:total-token-number-stats data)
         summary-evals (:summary-evals data)
-        summary-metadata (evaluators/collect-column-metadata summary-evals)
 
         ;; --- Perform calculations for each required metric ---
         num-examples (or (:count latency-stats) 0)
@@ -179,7 +183,8 @@
                              (.toLocaleString (int (/ total count)))
                              "N/A"))]
 
-    ($ :div.mb-6
+    ($ :div.space-y-4
+       ;; Overall Stats Table
        ($ :div.overflow-x-auto.bg-white.rounded-lg.border.border-gray-200.shadow-sm
           ($ :table.min-w-full
              ($ :tbody
@@ -192,21 +197,15 @@
                                 :tooltip "99% of runs completed faster than this time."})
                    ($ StatCell {:label "Avg Total Tokens"
                                 :value avg-total-tokens
-                                :tooltip "Average total tokens (input + output) per example."})
+                                :tooltip "Average total tokens (input + output) per example."})))))
 
-                   ;; Dynamically create a column for each summary evaluator TODO move this below
-                   (for [[eval-name metrics] summary-evals
-                         :let [columns (evaluators/columns-for-evaluator summary-metadata eval-name)]]
-                     ($ SummaryEvaluatorCell {:key (str eval-name)
-                                              :eval-name eval-name
-                                              :metrics metrics
-                                              :columns columns})))))))))
+       ;; Summary Evaluators Table
+       ($ SummaryEvaluatorsMetricsTable {:summary-evals summary-evals}))))
 
 (defn format-metric-value [value]
   (cond
     (true? value) ($ :span.text-green-700 "True")
     (false? value) ($ :span.text-red-700 "False")
-    (and (number? value) (<= 0 value) (<= value 1)) (str (int (* 100 value)) "/100")
     (number? value) (str value)
     (string? value) (if (> (count value) 20) (str (subs value 0 17) "…") value)
     (nil? value) ($ :span.italic.text-gray-400 "nil")
@@ -294,6 +293,36 @@
             {:onClick #(on-expand content-str)}
             "↗")))))
 
+(defui TraceLinkCapsule [{:keys [module-id target-initiate]}]
+  (let [target-agent-name (:agent-name target-initiate)
+        target-invoke (:agent-invoke target-initiate)
+        task-id (or (:task-id target-invoke)
+                    (:taskId target-invoke)
+                    (when target-invoke (.-taskId target-invoke)))
+        invoke-id (or (:agent-invoke-id target-invoke)
+                      (:agentInvokeId target-invoke)
+                      (when target-invoke (.-agentInvokeId target-invoke)))
+        invoke-fragment (when (and task-id invoke-id)
+                          (str task-id "-" invoke-id))
+        trace-url (when invoke-fragment
+                    (rfe/href :agent/invocation-detail
+                              {:module-id module-id
+                               :agent-name (common/url-encode target-agent-name)
+                               :invoke-id invoke-fragment}))]
+    (when trace-url
+      ($ :a {:href trace-url
+             :target "_blank"
+             :rel "noopener noreferrer"
+             :title "View execution trace for this run (opens in new tab)"
+             :onClick #(.stopPropagation %)
+             :className (common/cn
+                         "inline-flex items-center gap-1.5 px-2.5 py-1 "
+                         "bg-indigo-100 text-indigo-700 rounded-sm "
+                         "text-xs font-medium "
+                         "hover:bg-indigo-200 hover:text-indigo-800 transition-colors shadow-sm")}
+         ($ ArrowTopRightOnSquareIcon {:className "h-3.5 w-3.5"})
+         "View Trace"))))
+
 (defui ContentModal [{:keys [content title]}]
   ($ :div.p-6.space-y-4
      ($ :h4.text-lg.font-medium.text-gray-900.mb-4 (or title "Content"))
@@ -363,15 +392,20 @@
                      ($ :th {:className (common/cn (:th common/table-classes) "w-1/3")} "Output & Evaluations")))
                ($ :tbody
                   (for [[idx run] (map-indexed vector filtered-results)
-                        :let [evaluator-metadata (evaluators/collect-column-metadata (:evals run))]]
+                        :let [evaluator-metadata (evaluators/collect-column-metadata (:evals run))
+                              target-initiate (-> run :agent-initiates vals first)]]
                     ($ :tr.border-b {:key (str (:example-id run) "-" idx)}
                        ;; Input Cell
                        ($ :td {:className (:td common/table-classes)}
-                          ($ CellContent {:content (:input run)
-                                          :truncated? (not show-full-text?)
-                                          :on-expand #(state/dispatch [:modal/show :content-detail
-                                                                       {:title "Input"
-                                                                        :component ($ ContentModal {:content % :title "Input"})}])}))
+                          ($ :div.flex.flex-col.items-start.gap-2
+                             ($ CellContent {:content (:input run)
+                                             :truncated? (not show-full-text?)
+                                             :on-expand #(state/dispatch [:modal/show :content-detail
+                                                                          {:title "Input"
+                                                                           :component ($ ContentModal {:content % :title "Input"})}])})
+                             (when target-initiate
+                               ($ TraceLinkCapsule {:module-id module-id
+                                                    :target-initiate target-initiate}))))
                        ;; Reference Output Cell
                        ($ :td {:className (:td common/table-classes)}
                           ($ CellContent {:content (:reference-output run)
@@ -407,10 +441,10 @@
                                                  {:onClick #(state/dispatch [:modal/show :content-detail
                                                                              {:title "Output"
                                                                               :component ($ ContentModal {:content output-content :title "Output"})}])}
-                                                 "↗")))))))
-                               ($ EvaluatorCapsulesContainer {:run run
-                                                              :module-id module-id
-                                                              :columns-metadata evaluator-metadata})))))))))))))
+                                                 "↗")))))
+                                     ($ EvaluatorCapsulesContainer {:run run
+                                                                    :module-id module-id
+                                                                    :columns-metadata evaluator-metadata})))))))))))))))
                        ;; Trace Column placeholder (if needed later)
 
 (defui regular-experiment-detail-page [{:keys [module-id dataset-id experiment-id]}]
