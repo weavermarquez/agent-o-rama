@@ -3,7 +3,9 @@
    [com.rpl.specter :as s]
    [uix.core :as uix]
    [com.rpl.agent-o-rama.ui.common :as common]
-   [clojure.string :as str]))
+   [clojure.string :as str]
+   [com.rpl.agent-o-rama.ui.schemas :as schemas]
+   [schema.core :as s-core :include-macros true]))
 
 ;; =============================================================================
 ;; APP-DB: The Single Source of Truth
@@ -29,36 +31,33 @@
         (catch js/Error e
           (str "Invalid JSON: " (.-message e)))))))
 
+;; schema defined in schemas.cljs
 (def initial-db
   {:current-invocation {:invoke-id nil
                         :module-id nil
                         :agent-name nil}
-   :invocations-data {} ;; Keyed by invoke-id -> {:graph {:raw-nodes {} :nodes {} :edges []} :implicit-edges [] :summary ... :root-invoke-id ... :task-id ... :is-complete false}
+   :invocations-data {}
    :invocations {:all-invokes []
-                 :pagination-params nil ;; Next pagination params from server
+                 :pagination-params nil
                  :has-more? true
                  :loading? false}
-   :queries {} ; New map to store all query states
-   :route nil ; Current route match from reitit
-   :forms {} ; Form states keyed by form-id -> {:fields {} :valid? false :submitting? false :error nil :submit-event [...]}
+   :queries {}
+   :route nil
+   :forms {}
    :ui {:selected-node-id nil
         :forking-mode? false
         :changed-nodes {}
         :active-tab :info
         :current-route "/"
-        :breadcrumbs []
-        :modal {:active nil ;; nil or modal type keyword
-                :data {} ;; modal-specific data
+        :modal {:active nil
+                :data {}
                 :form {:submitting? false
                        :error nil}}
-        :hitl {:responses {} ;; Keyed by invoke-id -> response text
+        :hitl {:responses {}
                :submitting {}}
-        :datasets {:selected-examples {} ;; Keyed by dataset-id -> set of example-ids
-                   :selected-snapshot-per-dataset {}}} ;; Keyed by dataset-id -> snapshot-name 
-   :sente {:connected? false
-           :connection-state {}}
-   :session {:user-id nil
-             :preferences {}}})
+        :datasets {:selected-examples {}
+                   :selected-snapshot-per-dataset {}}}
+   :sente nil})
 
 (defonce app-db (atom initial-db))
 
@@ -86,7 +85,8 @@
 
 (defn dispatch
   "Dispatch an event to update app-db. Event is a vector [event-id & args].
-   The handler must return a Specter path navigator suitable for s/multi-transform."
+   The handler must return a Specter path navigator suitable for s/multi-transform.
+   Includes centralized schema validation for development builds."
   [event]
   (let [event-id (first event)
         event-args (rest event)
@@ -95,9 +95,28 @@
       (try
         (let [current-db @app-db
               specter-path (apply handler current-db event-args)]
-          ;; Allow handlers to return nil to indicate they handled the update themselves
+          ;; Allow handlers to return nil to indicate no state change is needed
           (when specter-path
-            (swap! app-db #(s/multi-transform specter-path %))))
+            ;; Perform the state transformation
+            (let [new-db (s/multi-transform specter-path current-db)]
+
+              ;; <<< START: CENTRALIZED VALIDATION HOOK >>>
+              ;; This validation runs only in dev builds (thanks to goog.DEBUG)
+              ;; It checks the entire state tree after every single change.
+              (when ^boolean js/goog.DEBUG
+                (try
+                  (s-core/validate schemas/AppDbSchema new-db)
+                  (catch :default e
+                    (println "🔥🔥 SCHEMA VALIDATION FAILED 🔥🔥")
+                    (println "Event that caused failure:" event)
+                    (println "Validation error details:" (ex-data e))
+                    ;; For aggressive debugging, you can throw the error to halt execution
+                    ;; (throw e)
+                    )))
+              ;; <<< END: CENTRALIZED VALIDATION HOOK >>>
+
+              ;; Atomically update the database
+              (reset! app-db new-db))))
         (catch :default e
           (println "💥 Error in event handler" event-id ":" e)
           (throw e)))
@@ -107,11 +126,32 @@
 ;; SUBSCRIPTIONS (REACTIVE STATE ACCESS)
 ;; =============================================================================
 
+(defn path->specter-path
+  "Converts a path vector (which may contain UUID objects) into a Specter path.
+   UUIDs are wrapped with s/keypath since Specter can't use them directly as navigators.
+   Other values (keywords, strings) are left as-is."
+  [path]
+  (mapv (fn [segment]
+          (if (uuid? segment)
+            (s/keypath segment)
+            segment))
+        path))
+
 (defn use-sub
-  "Subscribe to a value at the given Specter path in app-db.
-   Component will re-render only when the value at that path changes."
-  [specter-path]
-  (let [;; Memoize the extractor function to have stable reference
+  "Subscribe to a value at the given path in app-db.
+   The path may contain raw UUIDs - they will be converted to Specter navigators internally.
+   Component will re-render only when the value at that path changes.
+   
+   Example:
+     (use-sub [:ui :datasets :selected-examples dataset-id])
+   where dataset-id is a raw UUID object."
+  [path]
+  (let [;; Convert the path once, outside the callback
+        ;; This ensures we have a stable specter-path for the dependency array
+        specter-path (uix/use-memo
+                      (fn [] (path->specter-path path))
+                      [path])
+        ;; Memoize the extractor function to have stable reference
         extract-value (uix/use-callback
                        (fn [db] (s/select-one specter-path db))
                        [specter-path])
@@ -203,8 +243,9 @@
 ;; Usage: (dispatch [:db/set-value [:some :path] value])
 (reg-event :db/set-value
            (fn [db path value]
-    ;; Build a Specter navigator that sets the value at the given path
-             (into path [(s/terminal-val value)])))
+             ;; Build a Specter navigator that sets the value at the given path
+             ;; Convert any UUIDs in the path to keypath navigators
+             (into (path->specter-path path) [(s/terminal-val value)])))
 
 ;; Usage: (dispatch [:db/update-value [:some :path] update-fn])
 (reg-event :db/update-value
@@ -216,7 +257,7 @@
            (fn [db & path-value-pairs]
              (apply s/multi-path
                     (map (fn [[path value]]
-                           (into path [(s/terminal-val value)]))
+                           (into (path->specter-path path) [(s/terminal-val value)]))
                          path-value-pairs))))
 
 ;; Specific complex events that do more than just setting a value
@@ -247,7 +288,8 @@
 
 (reg-event :query/fetch-start
            (fn [db {:keys [query-key]}]
-             (into (into [:queries] query-key)
+             ;; Convert query-key with raw UUIDs to Specter path before navigating
+             (into (path->specter-path (into [:queries] query-key))
                    [(s/terminal (fn [current-state]
                                   (let [has-data? (some? (:data current-state))]
                                     (-> current-state
@@ -258,7 +300,8 @@
 
 (reg-event :query/fetch-success
            (fn [db {:keys [query-key data]}]
-             (into (into [:queries] query-key)
+             ;; Store queries in a flat map with the full query-key as the map key
+             (into (path->specter-path (into [:queries] query-key))
                    [(s/terminal (fn [_]
                                   {:status :success
                                    :data data
@@ -267,13 +310,14 @@
 
 (reg-event :query/fetch-error
            (fn [db {:keys [query-key error]}]
-             (into (into [:queries] query-key)
-                   [(s/terminal (fn [current-state]
-                                  (-> current-state
-                                      (assoc :error error
-                                             :fetching? false)
-                                      (cond-> (nil? (:data current-state))
-                                        (assoc :status :error)))))])))
+             ;; Store queries in a flat map with the full query-key as the map key
+             [:queries (s/keypath query-key)
+              (s/terminal (fn [current-state]
+                            (-> current-state
+                                (assoc :error error
+                                       :fetching? false)
+                                (cond-> (nil? (:data current-state))
+                                  (assoc :status :error)))))]))
 
 (reg-event :query/invalidate
            (fn [db {:keys [query-key-pattern]}]
@@ -315,10 +359,11 @@
                                       :else false))
                                   all-query-keys)]
                ;; Mark matching queries as stale by setting a flag (:should-refetch?)
+               ;; Convert query-key paths to Specter paths before navigation
                (when (seq matching-keys)
                  (apply s/multi-path
                         (map (fn [query-key]
-                               (into (into queries-path query-key)
+                               (into (path->specter-path (into queries-path query-key))
                                      [:should-refetch? (s/terminal-val true)]))
                              matching-keys))))))
 
@@ -336,7 +381,7 @@
               (s/terminal-val
                (s/transform
                 [:path-params s/MAP-VALS]
-                common/url-decode
+                (comp common/coerce-uuid common/url-decode)
                 new-match))]))
 
  ;; =============================================================================
@@ -361,17 +406,17 @@
  ;; Dataset selection event handlers
 (reg-event :datasets/toggle-selection
            (fn [db {:keys [dataset-id example-id]}]
-             [:ui :datasets :selected-examples dataset-id
-              (s/terminal #(if (contains? % example-id)
-                             (disj % example-id)
-                             (conj (or % #{}) example-id)))]))
+             (into (path->specter-path [:ui :datasets :selected-examples dataset-id])
+                   [(s/terminal #(if (contains? % example-id)
+                                   (disj % example-id)
+                                   (conj (or % #{}) example-id)))])))
 
 (reg-event :datasets/toggle-all-selection
            (fn [db {:keys [dataset-id example-ids-on-page select-all?]}]
-             [:ui :datasets :selected-examples dataset-id
-              (s/terminal #(if select-all?
-                             (into (or % #{}) example-ids-on-page)
-                             (apply disj (or % #{}) example-ids-on-page)))]))
+             (into (path->specter-path [:ui :datasets :selected-examples dataset-id])
+                   [(s/terminal #(if select-all?
+                                   (into (or % #{}) example-ids-on-page)
+                                   (apply disj (or % #{}) example-ids-on-page)))])))
 
 (reg-event :datasets/clear-selection
            (fn [db {:keys [dataset-id]}]
@@ -379,4 +424,6 @@
 
 (reg-event :datasets/set-selected-snapshot
            (fn [db {:keys [dataset-id snapshot-name]}]
-             [:ui :datasets :selected-snapshot-per-dataset dataset-id (s/terminal-val snapshot-name)]))
+             ;; Convert path with raw UUID to Specter path
+             (into (path->specter-path [:ui :datasets :selected-snapshot-per-dataset dataset-id])
+                   [(s/terminal-val snapshot-name)])))

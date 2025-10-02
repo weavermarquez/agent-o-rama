@@ -6,6 +6,7 @@
    [com.rpl.agent-o-rama.ui.state :as state]
    [com.rpl.agent-o-rama.ui.queries :as queries]
    [com.rpl.agent-o-rama.ui.sente :as sente]
+   [com.rpl.specter :as s]
    [clojure.string :as str]))
 
 (defui SnapshotManager [{:keys [module-id dataset-id selected-snapshot on-select-snapshot disabled? read-only?]}]

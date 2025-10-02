@@ -438,7 +438,6 @@
 
   :on-submit
   (fn [db form-state]
-    (println "form-state" form-state)
     (let [{:keys [form-id module-id dataset-id spec]} form-state
           spec-type (get spec :type)
           ;; Get selected IDs from the DB at submission time

@@ -236,7 +236,7 @@
   {:event (fn [db form-state]
             [:datasets/create-snapshot form-state])
    :on-success-invalidate (fn [db {:keys [module-id dataset-id]} _reply]
-                            {:query-key-pattern [:snapshot-names module-id dataset-id]})
+                            {:query-key-pattern [:snapshot-names module-id (str dataset-id)]})
    :on-success (fn [db {:keys [dataset-id]} reply]
                  ;; On success, directly dispatch an event to select the new snapshot
                  (state/dispatch [:datasets/set-selected-snapshot
@@ -278,9 +278,9 @@
             ;; 1. Get stable IDs from the route.
             (let [{:keys [module-id dataset-id]} (s/select-one [:route :path-params] db)
                   ;; 2. Get the CURRENTLY selected snapshot name from its state path.
-                  snapshot-name (s/select-one [:ui :datasets :selected-snapshot-per-dataset dataset-id] db)
+                  snapshot-name (s/select-one (state/path->specter-path [:ui :datasets :selected-snapshot-per-dataset dataset-id]) db)
                   ;; 3. Get the CURRENTLY selected example IDs from their state path.
-                  example-ids (s/select-one [:ui :datasets :selected-examples dataset-id] db)
+                  example-ids (s/select-one (state/path->specter-path [:ui :datasets :selected-examples dataset-id]) db)
                   ;; 4. Get the tag name from the form state.
                   {:keys [tag-name]} form-state]
               [:datasets/add-tag-to-examples
@@ -318,9 +318,9 @@
             ;; 1. Get stable IDs from the route.
             (let [{:keys [module-id dataset-id]} (s/select-one [:route :path-params] db)
                   ;; 2. Get the CURRENTLY selected snapshot name from its state path.
-                  snapshot-name (s/select-one [:ui :datasets :selected-snapshot-per-dataset dataset-id] db)
+                  snapshot-name (s/select-one (state/path->specter-path [:ui :datasets :selected-snapshot-per-dataset dataset-id]) db)
                   ;; 3. Get the CURRENTLY selected example IDs from their state path.
-                  example-ids (s/select-one [:ui :datasets :selected-examples dataset-id] db)
+                  example-ids (s/select-one (state/path->specter-path [:ui :datasets :selected-examples dataset-id]) db)
                   ;; 4. Get the tag name from the form state.
                   {:keys [tag-name]} form-state]
               [:datasets/remove-tag-from-examples
