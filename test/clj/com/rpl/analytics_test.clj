@@ -19,7 +19,10 @@
    [com.rpl.rama.ops :as ops]
    [com.rpl.rama.test :as rtest]
    [com.rpl.test-common :as tc]
-   [meander.epsilon :as m])
+   [jsonista.core :as j]
+   [meander.epsilon :as m]
+   [org.httpkit.server :as server]
+   [taoensso.nippy :as nippy])
   (:import
    [com.rpl.agentorama
     AgentFailedException]
@@ -1731,16 +1734,20 @@
       ))))
 
 
-(def SEM-ATOM)
+(def NODE-ACTION-ATOM)
 
 (deftest actions-scanning-test
   (with-redefs [TICKS (atom 0)
                 ACTIONS (atom [])
-                SEM-ATOM (atom nil)
+                NODE-ACTION-ATOM (atom nil)
                 i/SUBSTITUTE-TICK-DEPOTS true
 
                 i/hook:analytics-tick
                 (fn [& args] (swap! TICKS inc))
+
+                aor-types/get-config (max-retries-override 0)
+
+                anode/log-node-error (fn [& args])
 
                 anode/gen-node-id
                 (fn [& args]
@@ -1776,8 +1783,10 @@
                "start"
                "node1"
                (fn [agent-node input]
-                 (if-let [sem @SEM-ATOM]
-                   (h/acquire-semaphore sem))
+                 (if-let [action @NODE-ACTION-ATOM]
+                   (if (instance? java.util.concurrent.Semaphore action)
+                     (h/acquire-semaphore action)
+                     (throw (h/ex-info "fail" {}))))
                  (aor/emit! agent-node "node1" (str input "!"))))
               (aor/node
                "node1"
@@ -1853,10 +1862,10 @@
        (bind inv (aor/agent-initiate foo "b"))
        (is (= "b!?" (aor/agent-result foo inv)))
        (bind sem1 (h/mk-semaphore 0))
-       (reset! SEM-ATOM sem1)
+       (reset! NODE-ACTION-ATOM sem1)
        (bind invc (aor/agent-initiate foo "c"))
        (wait-acquired! sem1)
-       (reset! SEM-ATOM nil)
+       (reset! NODE-ACTION-ATOM nil)
        (bind inv (aor/agent-initiate foo "d"))
        (is (= "d!?" (aor/agent-result foo inv)))
        (bind inv (aor/agent-initiate foo "e"))
@@ -1873,21 +1882,35 @@
        (is (= [] @ACTIONS))
        (TopologyUtils/advanceSimTime (+ ana/NODE-ACTION-STALL-TIME-MILLIS 1000))
        (cycle!)
-       (is (= (frequencies @ACTIONS)
-              {["foo-start-fail" "start" ["c"] []] 1
-               ["foo-start-fail" "start" ["d"] [{"node" "node1" "args" ["d!"]}]] 1
-               ["foo-start-fail" "start" ["e"] [{"node" "node1" "args" ["e!"]}]] 1
-               ["foo-start" "start" ["d"] [{"node" "node1" "args" ["d!"]}]] 1
-               ["foo-start" "start" ["e"] [{"node" "node1" "args" ["e!"]}]] 1}))
-       (cycle!)
        (is (= [] @ACTIONS))
        (h/release-semaphore sem1 1)
        (is (= "c!?" (aor/agent-result foo invc)))
        (cycle!)
        (is (= (frequencies @ACTIONS)
-              {["foo-agent" nil ["c"] "c!?"] 1
+              {["foo-start-fail" "start" ["c"] [{"node" "node1" "args" ["c!"]}]] 1
+               ["foo-start-fail" "start" ["d"] [{"node" "node1" "args" ["d!"]}]] 1
+               ["foo-start-fail" "start" ["e"] [{"node" "node1" "args" ["e!"]}]] 1
+               ["foo-start" "start" ["c"] [{"node" "node1" "args" ["c!"]}]] 1
+               ["foo-start" "start" ["d"] [{"node" "node1" "args" ["d!"]}]] 1
+               ["foo-start" "start" ["e"] [{"node" "node1" "args" ["e!"]}]] 1
+               ["foo-agent" nil ["c"] "c!?"] 1
                ["foo-agent" nil ["d"] "d!?"] 1
                ["foo-agent" nil ["e"] "e!?"] 1}))
+
+
+       (reset! NODE-ACTION-ATOM :fail)
+       (bind inv (aor/agent-initiate foo "f"))
+       (is (thrown? Exception (aor/agent-result foo inv)))
+       (cycle!)
+       (is (= 1 (count @ACTIONS)))
+       (bind a (first @ACTIONS))
+       (is (= (subvec a 0 3) ["foo-agent" nil ["f"]]))
+       (is (instance? Exception (nth a 3)))
+
+       (TopologyUtils/advanceSimTime (+ ana/NODE-ACTION-STALL-TIME-MILLIS 1000))
+       (cycle!)
+       (is (= (frequencies @ACTIONS)
+              {["foo-start-fail" "start" ["f"] []] 1}))
       ))))
 
 (deftest add-to-dataset-action-test
@@ -1995,3 +2018,200 @@
                 {:i "z" :o {"b" {"a" "z" "q" 3}}}
                }))
       ))))
+
+(nippy/extend-freeze java.lang.ProcessHandleImpl
+                     ::process-handle
+                     [^java.lang.ProcessHandle ph out]
+                     (nippy/freeze-to-out! out (.pid ph)))
+
+(nippy/extend-thaw ::process-handle
+                   [in]
+                   (let [pid (nippy/thaw-from-in! in)]
+                     (.orElse (java.lang.ProcessHandle/of pid) nil)))
+
+(deftest webhook-action-test
+  (let [received-atom (atom [])
+        stop-server
+        (server/run-server
+         (fn [req]
+           (swap! received-atom conj req)
+           {:status  200
+            :headers {"Content-Type" "application/json"}
+            :body    (j/write-value-as-string {:ok true})})
+         {:port 0})]
+    (try
+      (with-redefs [TICKS (atom 0)
+                    i/SUBSTITUTE-TICK-DEPOTS true
+
+                    i/hook:analytics-tick
+                    (fn [& args] (swap! TICKS inc))]
+        (with-open [ipc (rtest/create-ipc)]
+          (letlocals
+           (bind port
+             (-> stop-server
+                 meta
+                 :local-port))
+           (bind url (str "http://127.0.0.1:" port "/test"))
+
+           (bind module
+             (aor/agentmodule
+              [topology]
+              (aor/declare-evaluator-builder
+               topology
+               "ph-eval"
+               ""
+               (fn [params]
+                 (fn [fetcher input ref-output output]
+                   {"score" (java.lang.ProcessHandle/current)})))
+              (-> topology
+                  (aor/new-agent "foo")
+                  (aor/node
+                   "start"
+                   nil
+                   (fn [agent-node input]
+                     (if (= input "qqq")
+                       (aor/result! agent-node (java.lang.ProcessHandle/current))
+                       (aor/result! agent-node (str input "!"))))))
+             ))
+           (rtest/launch-module! ipc module {:tasks 2 :threads 2})
+           (bind module-name (get-module-name module))
+           (bind agent-manager (aor/agent-manager ipc module-name))
+           (bind global-actions-depot
+             (:global-actions-depot (aor-types/underlying-objects agent-manager)))
+           (bind foo (aor/agent-client agent-manager "foo"))
+           (bind ana-depot (foreign-depot ipc module-name (po/agent-analytics-tick-depot-name)))
+           (bind foo-action-log (:action-log-query (aor-types/underlying-objects foo)))
+
+           (bind cycle!
+             (fn []
+               (reset! TICKS 0)
+               (reset! received-atom [])
+               (foreign-append! ana-depot nil)
+               (is (condition-attained? (> @TICKS 0)))
+               (rtest/pause-microbatch-topology! ipc
+                                                 module-name
+                                                 aor-types/AGENT-ANALYTICS-MB-TOPOLOGY-NAME)
+               (rtest/resume-microbatch-topology! ipc
+                                                  module-name
+                                                  aor-types/AGENT-ANALYTICS-MB-TOPOLOGY-NAME)))
+
+
+           (aor/create-evaluator! agent-manager
+                                  "concise5"
+                                  "aor/conciseness"
+                                  {"threshold" "5"}
+                                  "")
+           (aor/create-evaluator! agent-manager
+                                  "my-ph-eval"
+                                  "ph-eval"
+                                  {}
+                                  "")
+
+           (ana/add-rule! global-actions-depot
+                          "eval1"
+                          "foo"
+                          {:action-name       "aor/eval"
+                           :action-params     {"name" "concise5"}
+                           :filter            (aor-types/->AndFilter [])
+                           :sampling-rate     1.0
+                           :start-time-millis 0
+                           :include-failures? false
+                          })
+           (ana/add-rule! global-actions-depot
+                          "eval2"
+                          "foo"
+                          {:node-name         "start"
+                           :action-name       "aor/eval"
+                           :action-params     {"name" "my-ph-eval"}
+                           :filter            (aor-types/->AndFilter [])
+                           :sampling-rate     1.0
+                           :start-time-millis 0
+                           :include-failures? false
+                          })
+
+
+           (ana/add-rule!
+            global-actions-depot
+            "my-webhook"
+            "foo"
+            {:node-name         nil
+             :action-name       "aor/webhook"
+             :action-params     {"url"           url
+                                 "headers"       "{\"a\": \"abcdefg\"}"
+                                 "timeoutMillis" "30000"
+                                 "payloadTemplate" ana/DEFAULT-WEBHOOK-PAYLOAD}
+             :filter            (aor-types/->FeedbackFilter "eval1"
+                                                            "concise?"
+                                                            (aor-types/->ComparatorSpec :not= "a"))
+             :sampling-rate     1.0
+             :start-time-millis 0
+             :include-failures? false
+            })
+
+
+           (is (= "ccz!" (aor/agent-invoke foo "ccz")))
+           (cycle!)
+           (cycle!)
+           (is (= 1 (count @received-atom)))
+           (bind r (first @received-atom))
+           (is (= "abcdefg" (get (:headers r) "a")))
+           (bind m (j/read-value (slurp (:body r)) ana/STR-MAPPER))
+           (is (= #{"input" "output" "runInfo"} (set (keys m))))
+           (is (= ["ccz"] (get m "input")))
+           (is (= "ccz!" (get m "output")))
+           (bind ri (get m "runInfo"))
+           (is (= "my-webhook" (get ri "ruleName")))
+           (is (= "foo" (get ri "agentName")))
+           (is (>= (get ri "latencyMillis") 0))
+           (is (= "aor/webhook" (get ri "actionName")))
+           (is (= "agent" (get ri "type")))
+           (is (> (get ri "startTimeMillis") 0))
+           (is (= [{"source" "eval[concise5]" "scores" {"concise?" true}}] (get ri "feedback")))
+
+
+           (ana/delete-rule! global-actions-depot "foo" "my-webhook")
+           (ana/delete-rule! global-actions-depot "foo" "eval1")
+           (cycle!)
+           (ana/add-rule!
+            global-actions-depot
+            "my-webhook-start"
+            "foo"
+            {:node-name         "start"
+             :action-name       "aor/webhook"
+             :action-params
+             {"url"           url
+              "headers"       "{\"a\": \"abcdefg\"}"
+              "timeoutMillis" "30000"
+              "payloadTemplate"
+              "{\"o\": %output, \"r\":
+                                               %runInfo}"}
+             :filter            (aor-types/->FeedbackFilter "eval2"
+                                                            "score"
+                                                            (aor-types/->ComparatorSpec :not= "a"))
+             :sampling-rate     1.0
+             :start-time-millis 0
+             :include-failures? false
+            })
+
+           (bind res (aor/agent-invoke foo "qqq"))
+           (is (instance? java.lang.ProcessHandle res))
+           (cycle!)
+           (cycle!)
+           (is (= 1 (count @received-atom)))
+           (bind r (first @received-atom))
+           (is (= "abcdefg" (get (:headers r) "a")))
+           (bind m (j/read-value (slurp (:body r)) ana/STR-MAPPER))
+           (bind pid-str (str (java.lang.ProcessHandle/current)))
+           (is (= #{"o" "r"} (set (keys m))))
+           (is (= pid-str (get m "o")))
+           (bind ri (get m "r"))
+           (is (= "my-webhook-start" (get ri "ruleName")))
+           (is (= "foo" (get ri "agentName")))
+           (is (>= (get ri "latencyMillis") 0))
+           (is (= "aor/webhook" (get ri "actionName")))
+           (is (= "node" (get ri "type")))
+           (is (> (get ri "startTimeMillis") 0))
+           (is (= [{"source" "eval[my-ph-eval]" "scores" {"score" pid-str}}] (get ri "feedback")))
+          )))
+      (finally
+        (stop-server)))))

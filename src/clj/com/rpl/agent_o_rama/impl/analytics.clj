@@ -3,6 +3,7 @@
         [com.rpl.rama path])
   (:require
    [clojure.set :as set]
+   [clojure.string :as str]
    [com.rpl.agent-o-rama.impl.agent-node :as anode]
    [com.rpl.agent-o-rama.impl.clojure :as c]
    [com.rpl.agent-o-rama.impl.experiments :as exp]
@@ -15,7 +16,9 @@
    [com.rpl.agent-o-rama.impl.types :as aor-types]
    [com.rpl.agent-o-rama.throttled-logging :as tl]
    [com.rpl.rama.aggs :as aggs]
-   [com.rpl.rama.ops :as ops])
+   [com.rpl.rama.ops :as ops]
+   [jsonista.core :as j]
+   [org.httpkit.client :as http])
   (:import
    [com.rpl.agentorama.impl
     AgentDeclaredObjectsTaskGlobal
@@ -152,6 +155,69 @@
         {"exampleId" (str example-id)}
       ))))
 
+(def DEFAULT-WEBHOOK-PAYLOAD
+  "{\"input\": %input,
+  \"output\": %output,
+  \"runInfo\": %runInfo}")
+
+(def STR-MAPPER (j/object-mapper {:decode-key-fn str}))
+
+(defn json-compatible-value
+  [v]
+  (try
+    (j/write-value-as-string v)
+    v
+    (catch Throwable t
+      (str v))))
+
+(defn best-effort-json
+  [v]
+  (try
+    (j/write-value-as-string v)
+    (catch Throwable t
+      (str "\"" v "\""))))
+
+(defn run-info->map
+  [{:keys [rule-name action-name agent-name node-name type start-time-millis latency-millis
+           feedback]}]
+  (setval [MAP-VALS nil?]
+          NONE
+          {"ruleName"        rule-name
+           "actionName"      action-name
+           "agentName"       agent-name
+           "nodeName"        node-name
+           "type"            (if (= type :agent) "agent" "node")
+           "startTimeMillis" start-time-millis
+           "latencyMillis"   latency-millis
+           "feedback"        (mapv (fn [{:keys [scores source]}]
+                                     {"scores" (transform MAP-VALS json-compatible-value scores)
+                                      "source" (aor-types/source-string source)})
+                                   feedback)}))
+
+(defn webhook-action-builder-fn
+  [{:strs [url payloadTemplate headers timeoutMillis]}]
+  (let [timeout-millis (Long/parseLong timeoutMillis)
+        headers        (j/read-value headers STR-MAPPER)]
+    (fn [fetcher input output run-info]
+      (let [payload (-> payloadTemplate
+                        (str/replace "%input" (best-effort-json input))
+                        (str/replace "%output" (best-effort-json output))
+                        (str/replace "%runInfo" (j/write-value-as-string (run-info->map run-info))))
+            res     (deref
+                     (http/post url
+                                {:headers      headers
+                                 :body         payload
+                                 :content-type :json})
+                     timeout-millis
+                     ::timeout)]
+        (when (= res ::timeout)
+          (throw (h/ex-info "Timeout on HTTP request" {:url url :payload payload})))
+        (let [{:keys [status body error]} res]
+          (when (or (not= status 200) error)
+            (throw (h/ex-info "Error on HTTP request" {:status status :error error :body body})))
+          {"response" body}
+        )))))
+
 (def BUILT-IN-ACTIONS
   {"aor/eval"
    {:builder-fn  eval-action-builder-fn
@@ -173,7 +239,25 @@
                 "JSON path template to translate output of a run to dataset example output"
                 :default     "$"}}
              }}
-
+   "aor/webhook"
+   {:builder-fn  webhook-action-builder-fn
+    :description "Post a JSON payload to a URL"
+    :options
+    {:params
+     {"url"           {:description "URL"}
+      "payloadTemplate"
+      {:description
+       "JSON payload for the POST request. %input, %output, and %runInfo can be used as variables in the payload."
+       :default     DEFAULT-WEBHOOK-PAYLOAD}
+      "headers"
+      {:description
+       "Map from header name to header string specified as JSON"
+       :default     "{}"}
+      "timeoutMillis"
+      {:description
+       "Timeout for the POST request"
+       :default     "60000"}}
+    }}
   })
 
 
@@ -421,7 +505,7 @@
     )))
 
 (defn complete-node-map
-  [m node-name]
+  [m node-name node-exec]
   (if (nil? node-name)
     m
     (let [max-time        (max-node-scan-time)
@@ -429,8 +513,9 @@
           (fn [[k data]]
             (and (not (contains? data :finish-time-millis))
                  (not (contains? data :invoked-agg-invoke-id))
-                 (contains? data :start-time-millis); not strictly necessary
-                 (> (:start-time-millis data) max-time)))
+                 (or (retries/invoke-id-executing? node-exec k)
+                     (and (contains? data :start-time-millis); not strictly necessary
+                          (> (:start-time-millis data) max-time)))))
           first-invalid-offset (select-first [ALL invalid-offset? FIRST] m)]
       (if (nil? first-invalid-offset)
         m
@@ -623,9 +708,10 @@
    (<<ramafn %add-run-type
      [*m]
      (:> (assoc (into {} *m) :run-type (ifexpr (some? *node-name) :node :agent))))
+   (po/agent-node-executor-task-global :> *node-exec)
    (local-select> [(sorted-map-range-from *offset *scan-amt)
                    (sorted-map-range *offset *end-offset)
-                   (view complete-node-map *node-name)
+                   (view complete-node-map *node-name *node-exec)
                    (transformed MAP-VALS %add-run-type)]
                   $$p
                   :> *m)
