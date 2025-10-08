@@ -46,10 +46,15 @@
 
           ;; Add aggregated stats to the stats object
           summary-info (merge
-                        {:forks (foreign-select-one [(keypath agent-id) :forks (sorted-set-range-to-end 100)]
-                                                    root-pstate
-                                                    {:pkey agent-task-id})}
-                        summary-info-raw
+                        {:forks (foreign-select-one
+                                 [(keypath agent-id) :forks (sorted-set-range-to-end 100)]
+                                 root-pstate
+                                 {:pkey agent-task-id})}
+                        (->> summary-info-raw
+                             (transform
+                              [:feedback :results ALL :source :source]
+                              aor-types/source-string)
+                             (transform [:feedback :actions MAP-KEYS] name))
                         (when-let [stats (:stats summary-info-raw)]
                           {:stats (merge {:aggregated-stats (stats/aggregated-basic-stats stats)} stats)}))
 
@@ -70,7 +75,17 @@
                           (foreign-invoke-query tracing-query agent-task-id start-pairs page-limit))
 
           cleaned-nodes (when-let [m (:invokes-map dynamic-trace)]
-                          (-> m common/remove-implicit-nodes))
+                          (->> m
+                               common/remove-implicit-nodes
+                               (transform
+                                [MAP-VALS :feedback :results ALL :source :source]
+                                aor-types/source-string)
+                               (transform
+                                [MAP-VALS :feedback :results ALL :scores MAP-KEYS]
+                                name)
+                               (transform
+                                [MAP-VALS :feedback :actions MAP-KEYS]
+                                name)))
 
           next-leaves (:next-task-invoke-pairs dynamic-trace)
 
