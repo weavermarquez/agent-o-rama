@@ -38,6 +38,26 @@ export async function getBasicAgentRow(page) {
 }
 
 /**
+ * Gets the agent row for the E2ETestAgent module.
+ * @param {import('@playwright/test').Page} page - The Playwright page object.
+ * @returns {Promise<import('@playwright/test').Locator>} The agent row locator.
+ */
+export async function getE2ETestAgentRow(page) {
+  const moduleNs = 'com.rpl.agent.e2e-test-agent';
+  const moduleName = 'E2ETestAgentModule';
+  const agentName = 'E2ETestAgent';
+
+  // Use a more specific selector to avoid ambiguity
+  const agentRow = page.getByRole('row', { name: `${moduleNs}/${moduleName} ${agentName}` });
+
+  // Wait up to 30 seconds for agents to appear on first load.
+  await expect(agentRow).toBeVisible({ timeout: 30000 });
+  console.log(`Found agent: ${moduleNs}/${moduleName}:${agentName}`);
+
+  return agentRow;
+}
+
+/**
  * Creates an evaluator via the UI.
  * @param {import('@playwright/test').Page} page - The Playwright page object.
  * @param {Object} options - The evaluator creation options.
@@ -63,17 +83,16 @@ export async function createEvaluator(page, { name, builderName, description, pa
     await modal.getByLabel(paramKey, { exact: true }).fill(paramValue);
   }
 
-  // Optionally set JSONPath fields by expanding Advanced Options
+  // Optionally set JSONPath fields
   if (inputJsonPath || outputJsonPath || referenceOutputJsonPath) {
-    await modal.getByRole('button', { name: 'Advanced Options' }).click();
     if (inputJsonPath) {
-      await modal.getByLabel('Input JSON Path').fill(inputJsonPath);
+      await modal.getByLabel('Input JSON Path', { exact: true }).fill(inputJsonPath);
     }
     if (outputJsonPath) {
-      await modal.getByLabel('Output JSON Path').fill(outputJsonPath);
+      await modal.getByLabel('Output JSON Path', { exact: true }).fill(outputJsonPath);
     }
     if (referenceOutputJsonPath) {
-      await modal.getByLabel('Reference Output JSON Path').fill(referenceOutputJsonPath);
+      await modal.getByLabel('Reference Output JSON Path', { exact: true }).fill(referenceOutputJsonPath);
     }
   }
 

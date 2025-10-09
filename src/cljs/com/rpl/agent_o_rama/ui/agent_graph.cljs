@@ -308,17 +308,13 @@
                                                             ["ring-4" "ring-blue-400" "ring-opacity-75" "shadow-2xl" "transform" "scale-105"]
                                                             ["shadow-lg"])
                                         common-classes ["p-3" "rounded-md" "transition-all" "duration-200"]
-                 node-className    (str/join " "
-                                             (concat base-classes
-                                                     selection-classes
-                                                     common-classes))]
-             ($ :div
-                {:className "relative"}
-                ($ :div
-                   {:className node-className
-                    :style     {:width "170px" :height "40px"}
-                    :data-id   (str "agent-graph-node-" node-id)}
-                                          label)
+                                        node-className (str/join " " (concat base-classes selection-classes common-classes))]
+                                    ($ :div {:className "relative"}
+                                       ($ :div {:className node-className
+                                                :style {:width "170px" :height "40px"}
+                                                :data-id (str "agent-graph-node-" node-id)}
+                                          ($ :div {:className "truncate" :title label}
+                                             label))
                                        ($ Handle {:type "target" :position "top" :style {:display "none"}})
                                        ($ Handle {:type "source" :position "bottom" :style {:display "none"}})))))})
                      :edgeTypes

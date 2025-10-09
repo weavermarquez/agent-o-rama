@@ -109,7 +109,7 @@
              ($ ChevronUpIcon {:className "h-4 w-4"})
              ($ ChevronDownIcon {:className "h-4 w-4"}))))
      ($ :div.flex.items-center.gap-4
-        ($ :span.px-3.py-1.rounded-full.text-sm.font-medium
+        ($ :span.px-3.py-1.rounded-full.text-sm.font-medium.inline-flex.items-center.gap-2
            {:className (case status
                          :completed "bg-green-100 text-green-800"
                          :failed "bg-red-100 text-red-800"
@@ -117,7 +117,7 @@
            (case status
              :completed "✅ Completed"
              :failed "❌ Failed"
-             "🔄 Running"))
+             ($ :<> ($ common/spinner {:size :small}) "Running")))
         ($ :button.inline-flex.items-center.px-4.py-2.bg-blue-600.text-white.rounded-md.hover:bg-blue-700.transition-colors
            {:onClick on-rerun}
            ($ PlayIcon {:className "h-5 w-5 mr-2"})
@@ -162,11 +162,6 @@
         ;; --- Perform calculations for each required metric ---
         num-examples (or (:count latency-stats) 0)
 
-        success-rate (let [passed-count (count (filter #(not-any? :failure? (vals (:agent-results %))) results))]
-                       (if (pos? num-examples)
-                         (str (int (* 100 (/ passed-count num-examples))) "%")
-                         "N/A"))
-
         avg-latency (let [total (:total latency-stats 0)
                           count (:count latency-stats 0)]
                       (if (pos? count)
@@ -190,7 +185,6 @@
              ($ :tbody
                 ($ :tr
                    ($ StatCell {:label "# Examples" :value num-examples})
-                   ($ StatCell {:label "Success Rate" :value success-rate})
                    ($ StatCell {:label "Avg Latency" :value avg-latency})
                    ($ StatCell {:label "P99 Latency"
                                 :value p99-latency
@@ -372,33 +366,97 @@
 (defui ResultsTable [{:keys [results target module-id]}]
   (let [[show-full-text? set-show-full-text] (uix/use-state false)
         [active-filter set-active-filter] (uix/use-state :all)
+        [sort-by-state set-sort-by-state] (uix/use-state nil) ; nil or {:eval-name "...", :metric-key :...}
+        [reverse-sort? set-reverse-sort] (uix/use-state false)
+
+        ;; Collect all available evaluator metrics with proper disambiguation
+        all-evals (reduce (fn [acc run]
+                            (merge-with merge acc (:evals run)))
+                          {}
+                          results)
+        metadata (evaluators/collect-column-metadata all-evals)
+        available-columns (:columns metadata)
 
         ;; NEW: Filtering logic
         is-failure? (fn [run]
                       (let [agent-failed? (get-in run [:agent-results 0 :result :failure?])
-                            eval-failed? (some (fn [[_eval-name metrics]]
-                                                 (some false? (vals metrics)))
-                                               (:evals run))]
+                            eval-failed? (seq (:eval-failures run))]
                         (or agent-failed? eval-failed?)))
         is-success? (fn [run] (not (is-failure? run)))
 
         filtered-results (case active-filter
                            :all results
                            :success (filter is-success? results)
-                           :failure (filter is-failure? results))]
+                           :failure (filter is-failure? results))
+
+;; Sort the filtered results
+        sorted-results (if sort-by-state
+                         (let [comparator-fn (fn [run]
+                                               (let [eval-name (:eval-name sort-by-state)
+                                                     metric-key (:metric-key sort-by-state)
+                                                     val (get-in run [:evals eval-name metric-key])]
+                                                 (cond
+                                                   (number? val) val
+                                                   (true? val) 1
+                                                   (false? val) 0
+                                                   (nil? val) -1
+                                                   :else 0)))
+                               sorted (vec (sort-by comparator-fn filtered-results))]
+                           (if reverse-sort?
+                             (vec (reverse sorted))
+                             sorted))
+                         (vec filtered-results))
+
+        ;; Dropdown items for sort selector
+        sort-dropdown-items (concat
+                             [{:key "none"
+                               :label "None"
+                               :selected? (nil? sort-by-state)
+                               :on-select #(set-sort-by-state nil)}]
+                             (for [{:keys [eval-name metric-key label]} available-columns]
+                               {:key (str eval-name "::" metric-key)
+                                :label label
+                                :selected? (and sort-by-state
+                                                (= (:eval-name sort-by-state) eval-name)
+                                                (= (:metric-key sort-by-state) metric-key))
+                                :on-select #(set-sort-by-state {:eval-name eval-name
+                                                                :metric-key metric-key})}))
+        current-sort-label (when sort-by-state
+                             (let [col (first (filter #(and (= (:eval-name %) (:eval-name sort-by-state))
+                                                            (= (:metric-key %) (:metric-key sort-by-state)))
+                                                      available-columns))]
+                               (:label col)))]
     ($ :div
        ($ :div.flex.justify-between.items-center.mb-4
           ($ :h3.text-xl.font-bold "Detailed Results")
           ($ :div.flex.items-center.gap-4
              ($ FilterButtons {:active-filter active-filter
                                :on-change set-active-filter})
+             ;; Sort by dropdown
+             (when (seq available-columns)
+               ($ :div.flex.items-center.gap-2
+                  ($ :label.text-sm.text-gray-600 "Sort by:")
+                  ($ :div.w-64
+                     ($ common/Dropdown
+                        {:label "Sort by"
+                         :display-text (or current-sort-label "None")
+                         :items sort-dropdown-items
+                         :data-testid "sort-by-dropdown"}))))
+;; Reverse sort checkbox
+             (when sort-by-state
+               ($ :label.flex.items-center.gap-2.text-sm.text-gray-600
+                  ($ :input {:type "checkbox"
+                             :checked reverse-sort?
+                             :onChange #(set-reverse-sort (not reverse-sort?))
+                             :className "rounded"})
+                  "Reverse"))
              ($ :label.flex.items-center.gap-2.text-sm.text-gray-600
                 ($ :input {:type "checkbox"
                            :checked show-full-text?
                            :onChange #(set-show-full-text (not show-full-text?))
                            :className "rounded"})
                 "Show full text")))
-       (if (empty? filtered-results)
+       (if (empty? sorted-results)
          ($ :div.text-center.py-8.text-gray-500.bg-gray-50.rounded-lg
             "No results match the current filter.")
          ($ :div {:className (:container common/table-classes)}
@@ -409,7 +467,7 @@
                      ($ :th {:className (:th common/table-classes)} "Reference Output")
                      ($ :th {:className (common/cn (:th common/table-classes) "w-1/3")} "Output & Evaluations")))
                ($ :tbody
-                  (for [[idx run] (map-indexed vector filtered-results)
+                  (for [[idx run] (map-indexed vector sorted-results)
                         :let [evaluator-metadata (evaluators/collect-column-metadata (:evals run))
                               target-initiate (-> run :agent-initiates vals first)]]
                     ($ :tr.border-b {:key (str (:example-id run) "-" idx)}
@@ -434,35 +492,41 @@
                        ;; Output Cell with evaluator capsules
                        (let [agent-result (get-in run [:agent-results 0])]
                          ($ :td {:key "output-cell" :className (:td common/table-classes)}
-                            ($ :div {:className "flex flex-col gap-2"}
-                               ($ :div {:className (if show-full-text?
-                                                     "max-w-xl whitespace-pre-wrap break-words"
-                                                     "max-w-xs")}
-                                  ($ :div {:className (if show-full-text?
-                                                        "whitespace-pre-wrap break-words"
-                                                        "truncate")}
-                                     (if (:failure? (:result agent-result))
-                                       ($ :div.space-y-2
-                                          (if-let [throwable (get-in agent-result [:result :val :throwable])]
-                                            ($ :button.inline-flex.items-center.px-2.py-1.text-xs.text-red-700.bg-red-50.border.border-red-200.rounded.hover:bg-red-100.cursor-pointer
-                                               {:onClick #(state/dispatch [:modal/show :exception-detail
-                                                                           {:title "Error Details"
-                                                                            :component ($ ExceptionModal {:throwable throwable})}])}
-                                               "View Error")
-                                            ($ :span.text-red-500.font-semibold "FAIL")))
-                                       (let [output-content (common/pp (:val (:result agent-result)))
-                                             is-long? (> (count output-content) 100)]
-                                         ($ :div.relative.group
-                                            output-content
-                                            (when (and is-long? (not show-full-text?))
-                                              ($ :button.absolute.top-0.right-0.opacity-0.group-hover:opacity-100.transition-opacity.bg-blue-500.text-white.rounded.text-xs.px-2.py-1.hover:bg-blue-600
-                                                 {:onClick #(state/dispatch [:modal/show :content-detail
-                                                                             {:title "Output"
-                                                                              :component ($ ContentModal {:content output-content :title "Output"})}])}
-                                                 "↗")))))
-                                     ($ EvaluatorCapsulesContainer {:run run
-                                                                    :module-id module-id
-                                                                    :columns-metadata evaluator-metadata})))))))))))))))
+                            (if agent-result
+                              ;; If results exist, render the content (success or failure)
+                              ($ :div {:className "flex flex-col gap-2"}
+                                 ($ :div {:className (if show-full-text?
+                                                       "max-w-xl whitespace-pre-wrap break-words"
+                                                       "max-w-xs")}
+                                    ($ :div {:className (if show-full-text?
+                                                          "whitespace-pre-wrap break-words"
+                                                          "truncate")}
+                                       (if (:failure? (:result agent-result))
+                                         ($ :div.space-y-2
+                                            (if-let [throwable (get-in agent-result [:result :val :throwable])]
+                                              ($ :button.inline-flex.items-center.px-2.py-1.text-xs.text-red-700.bg-red-50.border.border-red-200.rounded.hover:bg-red-100.cursor-pointer
+                                                 {:onClick #(state/dispatch [:modal/show :exception-detail
+                                                                             {:title "Error Details"
+                                                                              :component ($ ExceptionModal {:throwable throwable})}])}
+                                                 "View Error")
+                                              ($ :span.text-red-500.font-semibold "FAIL")))
+                                         (let [output-content (common/pp (:val (:result agent-result)))
+                                               is-long? (> (count output-content) 100)]
+                                           ($ :div.relative.group
+                                              output-content
+                                              (when (and is-long? (not show-full-text?))
+                                                ($ :button.absolute.top-0.right-0.opacity-0.group-hover:opacity-100.transition-opacity.bg-blue-500.text-white.rounded.text-xs.px-2.py-1.hover:bg-blue-600
+                                                   {:onClick #(state/dispatch [:modal/show :content-detail
+                                                                               {:title "Output"
+                                                                                :component ($ ContentModal {:content output-content :title "Output"})}])}
+                                                   "↗"))))))
+                                    ($ EvaluatorCapsulesContainer {:run run
+                                                                   :module-id module-id
+                                                                   :columns-metadata evaluator-metadata})))
+                              ;; If no results yet, render the spinner
+                              ($ :div.flex.items-center.justify-center.h-full.text-gray-500.text-sm
+                                 ($ common/spinner {:size :medium})
+                                 ($ :span.ml-2 "Running..."))))))))))))))
 
 (defui regular-experiment-detail-page [{:keys [module-id dataset-id experiment-id]}]
   (let [{:keys [data loading? error]}

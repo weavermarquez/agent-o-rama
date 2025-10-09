@@ -44,12 +44,14 @@ test('should create, test, and clean up all three evaluator types', async ({ pag
   // Step 2: Fill out the form but deliberately omit the threshold parameter
   await modal.getByLabel('Name').fill('test-error-handling');
   await modal.getByLabel('Description').fill('Testing error handling');
-  // Deliberately NOT filling the threshold parameter
+  // Clear the threshold parameter that now has a default value
+  await modal.getByLabel('threshold').clear();
 
   await modal.getByRole('button', { name: 'Submit' }).click();
 
   // Step 3: Verify error message appears and spinner stops
-  await expect(modal.getByText(/Mismatched params.*threshold/)).toBeVisible({ timeout: 10000 });
+  // Now checking for NumberFormatException since cleared field is empty string, not nil
+  await expect(modal.getByText(/NumberFormatException.*For input string/)).toBeVisible({ timeout: 10000 });
   console.log('Error handling test passed - error message displayed correctly');
 
   // Close the modal to continue with successful creation
@@ -204,6 +206,133 @@ test('should create, test, and clean up all three evaluator types', async ({ pag
   await page.getByText('Evaluators').click();
   await expect(page).toHaveURL(/evaluations/);
   for (const name of [regularEvalName, summaryEvalName]) { // Removed comparativeEvalName
+    const evalRow = page.locator('table tbody tr').filter({ hasText: name });
+    if (await evalRow.isVisible()) {
+      await evalRow.getByRole('button', { name: 'Delete' }).click();
+      await expect(evalRow).not.toBeVisible();
+      console.log(`Cleaned up evaluator: ${name}`);
+    }
+  }
+  console.log('--- Cleanup Complete ---');
+});
+
+test('should test evaluators from the evaluators page with conditional field rendering', async ({ page }) => {
+  // SETUP PHASE: Navigate to the application
+  console.log('--- Starting Test Setup ---');
+  await page.goto('/');
+  await expect(page).toHaveTitle(/Agent-o-rama/);
+
+  const agentRow = await getResearchAgentRow(page);
+  await agentRow.click();
+  await expect(page).toHaveURL(new RegExp(`/agents/.*com\\.rpl\\.agent\\.research-agent.*ResearchAgentModule`));
+  console.log('--- Test Setup Complete ---');
+
+  const testUniqueId = randomUUID().substring(0, 8);
+  const testRegularEvalName = `e2e-concise-test-${testUniqueId}`;
+  const testSummaryEvalName = `e2e-f1-test-${testUniqueId}`;
+
+  // 1. Create evaluators
+  console.log('--- Creating Evaluators ---');
+  await page.getByText('Evaluators').click();
+  await expect(page).toHaveURL(/evaluations/);
+
+  await createEvaluator(page, { 
+    name: testRegularEvalName, 
+    builderName: 'aor/conciseness', 
+    description: 'Regular evaluator for testing from evaluators page.', 
+    params: { threshold: '15' } 
+  });
+  
+  await createEvaluator(page, { 
+    name: testSummaryEvalName, 
+    builderName: 'aor/f1-score', 
+    description: 'Summary evaluator for testing warning message.', 
+    params: { positiveValue: 'true' } 
+  });
+
+  console.log('--- Evaluators Created ---');
+
+  // 2. Test regular evaluator from evaluators page
+  console.log('--- Testing Regular Evaluator from Evaluators Page ---');
+  
+  // Click on the evaluator row to open details modal
+  const regularEvalRow = page.locator('table tbody tr').filter({ hasText: testRegularEvalName });
+  await regularEvalRow.click();
+  
+  // Wait for details modal to appear
+  const detailsModal = page.locator('[role="dialog"]');
+  await expect(detailsModal).toBeVisible();
+  await expect(detailsModal.getByText('Try Evaluator')).toBeVisible();
+  
+  // Click "Try Evaluator" button
+  await detailsModal.getByRole('button', { name: 'Try Evaluator' }).click();
+  
+  // Wait for the try evaluator modal to appear (details modal closes first)
+  await expect(detailsModal.getByRole('heading', { name: `Try Evaluator: ${testRegularEvalName}` })).toBeVisible({ timeout: 5000 });
+  
+  // CRITICAL TEST: Verify conditional field rendering
+  // aor/conciseness has :input-path? false and :reference-output-path? false
+  // So we should NOT see "Input (JSON)" or "Reference Output (JSON)" fields
+  console.log('Verifying conditional field rendering...');
+  await expect(detailsModal.getByText('Input (JSON)')).not.toBeVisible();
+  await expect(detailsModal.getByText('Reference Output (JSON)')).not.toBeVisible();
+  
+  // But we SHOULD see the "Model Output (JSON)" field
+  await expect(detailsModal.getByText('Model Output (JSON)')).toBeVisible();
+  
+  // Test the evaluator with a short output (should pass)
+  const outputField = detailsModal.getByPlaceholder('{"result": "..."}');
+  await outputField.fill('"short"');
+  await detailsModal.getByRole('button', { name: 'Run Evaluator' }).click();
+  await expect(detailsModal.getByText(/"concise\?":\s*true/)).toBeVisible();
+  
+  // Test with a long output (should fail)
+  await outputField.fill('"this is a very long string that exceeds the threshold"');
+  await detailsModal.getByRole('button', { name: 'Run Evaluator' }).click();
+  await expect(detailsModal.getByText(/"concise\?":\s*false/)).toBeVisible();
+  
+  console.log('Regular evaluator test passed with correct conditional field rendering!');
+  
+  // Close the modal
+  await detailsModal.getByRole('button', { name: '×' }).click();
+  await expect(detailsModal).not.toBeVisible();
+
+  // 3. Test summary evaluator warning message
+  console.log('--- Testing Summary Evaluator Warning Message ---');
+  
+  // Click on the summary evaluator row
+  const summaryEvalRow = page.locator('table tbody tr').filter({ hasText: testSummaryEvalName });
+  await summaryEvalRow.click();
+  
+  // Wait for details modal
+  await expect(detailsModal).toBeVisible();
+  await expect(detailsModal.getByText('Try Evaluator')).toBeVisible();
+  
+  // Click "Try Evaluator" button
+  await detailsModal.getByRole('button', { name: 'Try Evaluator' }).click();
+  
+  // Wait for the try evaluator modal
+  await expect(detailsModal.getByRole('heading', { name: `Try Evaluator: ${testSummaryEvalName}` })).toBeVisible({ timeout: 5000 });
+  
+  // CRITICAL TEST: Verify warning message for summary evaluator with no selected examples
+  console.log('Verifying warning message for summary evaluator...');
+  await expect(detailsModal.getByText('To test a summary evaluator, select examples from a dataset and click the "Try Summary Evaluator" button from the selection menu.')).toBeVisible();
+  
+  // Verify the Run button is disabled
+  const runButton = detailsModal.getByRole('button', { name: 'Run Evaluator' });
+  await expect(runButton).toBeDisabled();
+  
+  console.log('Summary evaluator warning test passed!');
+  
+  // Close the modal
+  await detailsModal.getByRole('button', { name: '×' }).click();
+  await expect(detailsModal).not.toBeVisible();
+
+  // 4. CLEANUP PHASE
+  console.log('--- Starting Cleanup ---');
+  page.on('dialog', dialog => dialog.accept());
+  
+  for (const name of [testRegularEvalName, testSummaryEvalName]) {
     const evalRow = page.locator('table tbody tr').filter({ hasText: name });
     if (await evalRow.isVisible()) {
       await evalRow.getByRole('button', { name: 'Delete' }).click();
