@@ -244,7 +244,7 @@
   (filter> (contains? *agent-names *agent-name))
   (<<with-substitutions
    [$$root (po/agent-root-task-global *agent-name)]
-   (filter> (or> (nil? *value) (aor-types/valid-metadata-value? *value)))
+   (filter> (or> (nil? *value) (aor-types/valid-restricted-map-value? *value)))
    (<<ramafn %metadata-edit-val
      [_]
      (:> (metadata-edit-val *value)))
@@ -436,7 +436,7 @@
                                   *retry-num)
    (local-transform> [(keypath *invoke-id)
                       (multi-path
-                       [:nested-ops (termval *nested-ops)]
+                       [:nested-ops NIL->VECTOR END (termval *nested-ops)]
                        [:exceptions AFTER-ELEM (termval *throwable-str)])]
                      $$nodes)
    (|direct *agent-task-id)
@@ -536,11 +536,13 @@
      [*m]
      (:> (reduce-kv assoc
                     *m
-                    {:emits      *emits
-                     :result     *result
-                     :nested-ops *nested-ops
+                    {:emits  *emits
+                     :result *result
                      :finish-time-millis *finish-time-millis})))
-   (local-transform> [(keypath *invoke-id) (term %merger)]
+   (local-transform> [(keypath *invoke-id)
+                      (multi-path
+                       (term %merger)
+                       [:nested-ops NIL->VECTOR END (termval *nested-ops)])]
                      $$nodes)
 
    (<<if (-> (po/agent-graph-task-global *agent-name)
@@ -815,16 +817,24 @@
     *streaming-index
     *value
     :> *chunk)
+   (h/current-time-millis :> *curr-millis)
+   (<<ramafn %update-nil-time
+     [*v]
+     (:> (or> *v *curr-millis)))
    (local-transform>
-    [(keypath *agent-id :streaming *node)
+    [(keypath *agent-id)
      (selected?
+      (keypath :streaming *node)
       :invokes
       (keypath *invoke-id)
       (nil->val -1)
       (pred %correct-index?))
      (multi-path
-      [:all AFTER-ELEM (termval *chunk)]
-      [:invokes (keypath *invoke-id) (termval *streaming-index)])]
+      [:first-token-time-millis (term %update-nil-time)]
+      [(keypath :streaming *node)
+       (multi-path
+        [:all AFTER-ELEM (termval *chunk)]
+        [:invokes (keypath *invoke-id) (termval *streaming-index)])])]
     $$root)
   ))
 

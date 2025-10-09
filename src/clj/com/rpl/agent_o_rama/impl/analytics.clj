@@ -162,14 +162,6 @@
 
 (def STR-MAPPER (j/object-mapper {:decode-key-fn str}))
 
-(defn json-compatible-value
-  [v]
-  (try
-    (j/write-value-as-string v)
-    v
-    (catch Throwable t
-      (str v))))
-
 (defn best-effort-json
   [v]
   (try
@@ -190,7 +182,9 @@
            "startTimeMillis" start-time-millis
            "latencyMillis"   latency-millis
            "feedback"        (mapv (fn [{:keys [scores source]}]
-                                     {"scores" (transform MAP-VALS json-compatible-value scores)
+                                     ;; scores are mandated by AOR to be numbers, strings, or
+                                     ;; booleans, so don't need any special handling here
+                                     {"scores" scores
                                       "source" (aor-types/source-string source)})
                                    feedback)}))
 
@@ -290,6 +284,19 @@
   [info]
   (= :agent (:run-type info)))
 
+(defn log-regex-error
+  [t]
+  (tl/error ::regex-failure t "Regex match exception"))
+
+(defn- regex-match?
+  [regex json-path o]
+  (try
+    (some? (re-find regex (h/read-json-path o json-path)))
+    (catch Throwable t
+      (log-regex-error t)
+      false
+    )))
+
 (extend-protocol aor-types/RuleFilter
   FeedbackFilter
   (dependency-rule-names [this] #{(:rule-name this)})
@@ -329,7 +336,7 @@
   (dependency-rule-names [this] #{})
   (rule-filter-matches? [this info]
     (let [o (if (agent-run-type? info) (:invoke-args info) (:input info))]
-      (some? (re-find (:regex this) (h/read-json-path o (:json-path this))))))
+      (regex-match? (:regex this) (:json-path this) o)))
 
   OutputMatchFilter
   (dependency-rule-names [this] #{})
@@ -339,8 +346,7 @@
                        :result
                        :val)
                    (h/node->output (:result info) (:emits info)))]
-      (some? (re-find (:regex this) (h/read-json-path output (:json-path this))))
-    ))
+      (regex-match? (:regex this) (:json-path this) output)))
 
   TokenCountFilter
   (dependency-rule-names [this] #{})
