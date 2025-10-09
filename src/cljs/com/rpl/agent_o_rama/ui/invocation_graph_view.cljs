@@ -259,6 +259,244 @@
   [invoke-args result-val]
   {"node" "agent" "args" [result-val]})
 
+(defui hitl-request-panel [{:keys [hr hr-invoke-id hitl-response submitting? module-id agent-name invoke-id]}]
+  (when hr
+    ($ :div {:className "bg-amber-50 p-3 rounded-md mt-4 border border-amber-200"}
+       ($ :div {:className "text-sm font-medium text-amber-800 mb-2"} "Human input required")
+       ($ :div {:className "text-sm text-amber-700 mb-3 whitespace-pre-wrap"} (:prompt hr))
+       ($ :div
+          ($ :textarea {:className "w-full border rounded p-2 text-sm resize-y"
+                        :rows 3
+                        :placeholder "Type your response..."
+                        :value (or hitl-response "")
+                        :disabled submitting?
+                        :onChange #(state/dispatch [:db/set-value
+                                                    [:ui :hitl :responses hr-invoke-id]
+                                                    (.. % -target -value)])})
+          ($ :button {:className (common/cn "mt-2 px-3 py-2 rounded text-sm font-medium transition-colors"
+                                            {"bg-gray-400 text-gray-600 cursor-not-allowed" submitting?
+                                             "bg-blue-600 hover:bg-blue-700 text-white" (not submitting?)})
+                      :disabled (or submitting? (empty? (str/trim (or hitl-response ""))))
+                      :onClick #(when (and (not submitting?)
+                                           (not (empty? (str/trim (or hitl-response "")))))
+                                  (state/dispatch [:hitl/submit
+                                                   {:module-id module-id
+                                                    :agent-name agent-name
+                                                    :invoke-id invoke-id
+                                                    :request hr
+                                                    :response (str/trim hitl-response)}])
+                                  ;; Clear the response after submission
+                                  (state/dispatch [:db/set-value [:ui :hitl :responses hr-invoke-id] ""]))}
+             (if submitting? "Submitting..." "Submit Response"))))))
+
+(defui node-info-panel [{:keys [node-id node-name graph-data module-id]}]
+  ($ :div {:className "bg-indigo-50 p-3 rounded-md mt-4"}
+     ($ :div {:className "flex justify-between items-center"}
+        ($ :span {:className "text-sm font-medium text-indigo-700"} "Node")
+        ($ :span {:className "text-sm text-indigo-600 font-mono"} node-name))
+     ($ :div {:className "flex justify-between items-center mt-1"}
+        ($ :span {:className "text-sm font-medium text-indigo-700"} "ID")
+        ($ :span {:className "text-xs text-indigo-500 font-mono"} (str node-id)))
+     ;; Add to Dataset button for individual node
+     ($ :div {:className "mt-3"}
+        ($ :button
+           {:className "text-sm font-medium py-1 px-3 rounded-md transition-colors bg-green-100 text-green-800 hover:bg-green-200"
+            :onClick (fn [e]
+                       (.stopPropagation e)
+                       (let [raw-node-data (get graph-data node-id)
+                             input-data (transform-node-input-for-dataset raw-node-data node-name)
+                             output-data (transform-node-data-for-dataset raw-node-data node-name)]
+                         (state/dispatch [:modal/show-form :add-from-trace
+                                          {:module-id module-id
+                                           :title (str "Add Node '" node-name "' to Dataset")
+                                           :source-type :node
+                                           :source-args input-data
+                                           :source-emits output-data}])))}
+           "Add node to Dataset"))))
+
+(defui node-result-panel [{:keys [result]}]
+  (when result
+    ($ :div {:className "bg-blue-50 p-3 rounded-md mt-4"}
+       ($ :div {:className "text-sm font-medium text-blue-700 mb-1"} "Result")
+       ($ generic-data-viewer {:data result
+                               :color "blue"
+                               :truncate-length 100
+                               :depth 0}))))
+
+(defui node-exceptions-panel [{:keys [exceptions]}]
+  (when (seq exceptions)
+    ($ :div {:className "bg-red-50 p-3 rounded-md mt-4 border border-red-200"}
+       ($ :div {:className (common/cn "text-sm font-medium text-red-700 mb-2 flex items-center gap-2")}
+          ($ ExclamationTriangleIcon {:className (common/cn "w-5 h-5")})
+          (str "Exceptions (" (count exceptions) ")"))
+       ($ :div {:className "space-y-2"}
+          (for [[idx exc-str] (map-indexed vector exceptions)]
+            (let [first-line (first (str/split-lines exc-str))]
+              ($ :div {:key idx
+                       :className "bg-white p-2 rounded border border-red-100 cursor-pointer hover:bg-red-50 transition-colors"
+                       :onClick (fn [e]
+                                  (.stopPropagation e)
+                                  (state/dispatch [:modal/show :exception-detail
+                                                   {:title (str "Exception " (inc idx))
+                                                    :component ($ ExceptionDetailModal {:title (str "Exception " (inc idx)) :content exc-str})}]))
+                       :title "Click to view full exception"}
+                 ($ :div {:className "text-xs font-mono text-red-800"}
+                    first-line))))))))
+
+(defui node-timing-panel [{:keys [start-time finish-time duration]}]
+  (when (and start-time finish-time)
+    ($ :div {:className "bg-yellow-50 p-3 rounded-md mt-4"}
+       ($ :div {:className "text-sm font-medium text-yellow-700 mb-2"} "Timing")
+       ($ :div {:className "space-y-1"}
+          ($ :div {:className "flex justify-between"}
+             ($ :span {:className "text-xs text-yellow-600"} "Duration")
+             ($ :span {:className "text-xs text-yellow-600 font-mono"
+                       :title (str "Started: " (format-ms start-time) "\nFinished: " (format-ms finish-time))}
+                (str duration "ms")))
+          ($ :div {:className "flex justify-between"}
+             ($ :span {:className "text-xs text-yellow-600"} "Started")
+             ($ :span {:className "text-xs text-yellow-600 font-mono"}
+                (format-ms start-time)))
+          ($ :div {:className "flex justify-between"}
+             ($ :span {:className "text-xs text-yellow-600"} "Finished")
+             ($ :span {:className "text-xs text-yellow-600 font-mono"}
+                (format-ms finish-time)))))))
+
+(defui node-input-panel [{:keys [input]}]
+  (when input
+    ($ :div {:className "bg-green-50 p-3 rounded-md mt-4"}
+       ($ :div {:className "text-sm font-medium text-green-700 mb-1"} "Input")
+       ($ generic-data-viewer {:data input
+                               :color "green"
+                               :truncate-length 100
+                               :depth 0}))))
+
+(defui node-operations-panel [{:keys [data]}]
+  (when (not (empty? (:nested-ops data)))
+    ($ :div {:className "bg-sky-50 p-3 rounded-md mt-4"}
+       ($ :div {:className "text-sm font-medium text-sky-700 mb-2"}
+          (str "Operations (" (count (:nested-ops data)) ")"))
+       ($ :div {:className "space-y-2"}
+          (for [op (:nested-ops data)]
+            (let [info (:info op)
+                  op-type (:type op)
+                  start-time (:start-time-millis op)
+                  finish-time (:finish-time-millis op)
+                  duration (when (and start-time finish-time)
+                             (str (- finish-time start-time)))]
+              ($ :div {:key (str (str start-time) "-" (str finish-time))
+                       :className "bg-white p-3 rounded border border-sky-200"}
+
+                 ;; Header
+                 ($ :div {:className (common/cn "flex justify-between items-start mb-2")}
+                    ($ :div {:className "flex-1"}
+                       ($ :div {:className "flex items-center gap-2"}
+                          ($ :span {:className "text-sm font-medium text-sky-800 bg-sky-100 px-2 py-1 rounded"}
+                             op-type)
+                          (when (:objectName info)
+                            ($ :span {:className "text-sm font-mono text-sky-700"}
+                               (:objectName info)))))
+                    ($ :div {:className "flex items-center gap-2"}
+                       (when duration
+                         ($ :div {:className "text-xs text-sky-500 font-mono"
+                                  :title (str "Started: " (format-ms start-time) "\nFinished: " (format-ms finish-time))}
+                            (str duration "ms")))
+                       ;; Add navigation button for agent-call operations
+                       (when (= (keyword op-type) :agent-call)
+                         (let [invoke-data (if (= (str (:op info)) "initiate")
+                                             (:result info)
+                                             (:agent-invoke info))
+                               task-id (:task-id invoke-data)
+                               agent-invoke-id (:agent-invoke-id invoke-data)
+                               module-id (:agent-module-name info)
+                               agent-name (:agent-name info)
+                               can-navigate? (and (not (nil? task-id)) (not (nil? agent-invoke-id)) module-id agent-name)
+                               target-url (when can-navigate?
+                                            (str "/agents/" (common/url-encode module-id)
+                                                 "/agent/" (common/url-encode agent-name)
+                                                 "/invocations/" task-id "-" agent-invoke-id))]
+                           (when target-url
+                             ($ :button {:onClick (fn [] (js/window.open target-url "_blank"))
+                                         :className "inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-white bg-indigo-600 rounded hover:bg-indigo-700 transition-colors cursor-pointer shadow-sm"}
+                                "View"
+                                ($ ArrowTopRightOnSquareIcon {:className "h-3 w-3"})))))))
+
+                 ;; Body
+                 ($ :div {:className "text-xs text-sky-600 mt-1"}
+                    ($ generic-data-viewer {:data info :color "sky" :depth 0})))))))))
+
+(defui node-emits-panel [{:keys [emits graph-data flow-nodes on-select-node on-paginate-node]}]
+  (when (and emits (> (count emits) 0))
+    ($ :div {:className "mt-4 bg-purple-50 p-3 rounded-md"}
+       ($ :div {:className "text-sm font-medium text-purple-700 mb-2"}
+          (str "Emits (" (count emits) ")"))
+       ($ :div {:className "space-y-2"}
+          (for [[idx emit] (map-indexed vector (js->clj emits :keywordize-keys true))]
+            (let [emit-id (str (:invoke-id emit))
+                  is-loaded (contains? graph-data (:invoke-id emit))
+                  border-class (if is-loaded "border-purple-200" "border-dashed border-purple-300")
+                  cursor-class "cursor-pointer"
+                  bg-class (if is-loaded "bg-gray-50" "bg-white hover:bg-purple-50")]
+              ($ :div {:key (str "emit-" idx)
+                       :className (str bg-class " p-2 rounded border " border-class " " cursor-class " transition-colors")
+                       :onClick (fn [e]
+                                  (.stopPropagation e)
+                                  (if is-loaded
+                                    ;; Find and select the loaded node
+                                    (let [nodes (js->clj flow-nodes :keywordize-keys true)
+                                          target-node (->> nodes
+                                                           (filter #(= (-> % :data :node-id) (:invoke-id emit)))
+                                                           first)]
+                                      (when (and target-node on-select-node)
+                                        (on-select-node (:invoke-id emit))))
+                                    ;; Load the unloaded node
+                                    (when on-paginate-node
+                                      (on-paginate-node emit-id))))}
+                 ($ :div {:className "text-xs text-purple-600"}
+                    ($ :div (str "→ " (:node-name emit)))
+                    (when (:args emit)
+                      ($ generic-data-viewer {:data (:args emit)
+                                              :color "purple"
+                                              :truncate-length 60
+                                              :depth 0}))
+                    ($ :div {:className "text-purple-400 mt-1 font-mono text-xs"}
+                       (str "ID: " emit-id))))))))))
+
+(defui node-details-info-panel [{:keys [data hr hr-invoke-id hitl-response submitting? module-id agent-name invoke-id
+                                        node-id node-name result exceptions start-time finish-time duration input
+                                        emits graph-data flow-nodes on-select-node on-paginate-node]}]
+  ($ :<>
+     ($ hitl-request-panel {:hr hr
+                            :hr-invoke-id hr-invoke-id
+                            :hitl-response hitl-response
+                            :submitting? submitting?
+                            :module-id module-id
+                            :agent-name agent-name
+                            :invoke-id invoke-id})
+
+     ($ node-info-panel {:node-id node-id
+                         :node-name node-name
+                         :graph-data graph-data
+                         :module-id module-id})
+
+     ($ node-result-panel {:result result})
+
+     ($ node-exceptions-panel {:exceptions exceptions})
+
+     ($ node-timing-panel {:start-time start-time
+                           :finish-time finish-time
+                           :duration duration})
+
+     ($ node-input-panel {:input input})
+
+     ($ node-operations-panel {:data data})
+
+     ($ node-emits-panel {:emits emits
+                          :graph-data graph-data
+                          :flow-nodes flow-nodes
+                          :on-select-node on-select-node
+                          :on-paginate-node on-paginate-node})))
+
 (defui selected-node-component [{:keys [selected-node graph-data on-paginate-node on-select-node flow-nodes module-id agent-name invoke-id]}]
   (let [data (when selected-node
                (js->clj (.-data selected-node) :keywordize-keys true))
@@ -317,206 +555,28 @@
          ($ :div {:className "p-6"}
             (case active-tab
               :info
-              ($ :<>
-                 ;; Human input section
-                 (when hr
-                   ($ :div {:className "bg-amber-50 p-3 rounded-md mt-4 border border-amber-200"}
-                      ($ :div {:className "text-sm font-medium text-amber-800 mb-2"} "Human input required")
-                      ($ :div {:className "text-sm text-amber-700 mb-3 whitespace-pre-wrap"} (:prompt hr))
-                      ($ :div
-                         ($ :textarea {:className "w-full border rounded p-2 text-sm resize-y"
-                                       :rows 3
-                                       :placeholder "Type your response..."
-                                       :value (or hitl-response "")
-                                       :disabled submitting?
-                                       :onChange #(state/dispatch [:db/set-value
-                                                                   [:ui :hitl :responses hr-invoke-id]
-                                                                   (.. % -target -value)])})
-                         ($ :button {:className (common/cn "mt-2 px-3 py-2 rounded text-sm font-medium transition-colors"
-                                                           {"bg-gray-400 text-gray-600 cursor-not-allowed" submitting?
-                                                            "bg-blue-600 hover:bg-blue-700 text-white" (not submitting?)})
-                                     :disabled (or submitting? (empty? (str/trim (or hitl-response ""))))
-                                     :onClick #(when (and (not submitting?)
-                                                          (not (empty? (str/trim (or hitl-response "")))))
-                                                 (state/dispatch [:hitl/submit
-                                                                  {:module-id module-id
-                                                                   :agent-name agent-name
-                                                                   :invoke-id invoke-id
-                                                                   :request hr
-                                                                   :response (str/trim hitl-response)}])
-                                                 ;; Clear the response after submission
-                                                 (state/dispatch [:db/set-value [:ui :hitl :responses hr-invoke-id] ""]))}
-                            (if submitting? "Submitting..." "Submit Response")))))
-
-                 ($ :div {:className "bg-indigo-50 p-3 rounded-md mt-4"}
-               ($ :div {:className "flex justify-between items-center"}
-                  ($ :span {:className "text-sm font-medium text-indigo-700"} "Node")
-                  ($ :span {:className "text-sm text-indigo-600 font-mono"} node-name))
-               ($ :div {:className "flex justify-between items-center mt-1"}
-                  ($ :span {:className "text-sm font-medium text-indigo-700"} "ID")
-                  ($ :span {:className "text-xs text-indigo-500 font-mono"} (str node-id)))
-               ;; Add to Dataset button for individual node
-               ($ :div {:className "mt-3"}
-                  ($ :button
-                     {:className "text-sm font-medium py-1 px-3 rounded-md transition-colors bg-green-100 text-green-800 hover:bg-green-200"
-                      :onClick (fn [e]
-                                 (.stopPropagation e)
-                                 (let [raw-node-data (get graph-data node-id)
-                                       input-data (transform-node-input-for-dataset raw-node-data node-name)
-                                       output-data (transform-node-data-for-dataset raw-node-data node-name)]
-                                   (state/dispatch [:modal/show-form :add-from-trace
-                                                    {:module-id module-id
-                                                     :title (str "Add Node '" node-name "' to Dataset")
-                                                     :source-type :node
-                                                     :source-args input-data
-                                                     :source-emits output-data}])))}
-                     "Add node to Dataset")))
-
-                 (when result
-              ($ :div {:className "bg-blue-50 p-3 rounded-md mt-4"}
-                 ($ :div {:className "text-sm font-medium text-blue-700 mb-1"} "Result")
-                 ($ generic-data-viewer {:data result
-                                         :color "blue"
-                                         :truncate-length 100
-                                         :depth 0})))
-
-                 (when (seq exceptions)
-              ($ :div {:className "bg-red-50 p-3 rounded-md mt-4 border border-red-200"}
-                 ($ :div {:className (common/cn "text-sm font-medium text-red-700 mb-2 flex items-center gap-2")}
-                    ($ ExclamationTriangleIcon {:className (common/cn "w-5 h-5")})
-                    (str "Exceptions (" (count exceptions) ")"))
-                 ($ :div {:className "space-y-2"}
-                    (for [[idx exc-str] (map-indexed vector exceptions)]
-                      (let [first-line (first (str/split-lines exc-str))]
-                        ($ :div {:key idx
-                                 :className "bg-white p-2 rounded border border-red-100 cursor-pointer hover:bg-red-50 transition-colors"
-                                 :onClick (fn [e]
-                                            (.stopPropagation e)
-                                            (state/dispatch [:modal/show :exception-detail
-                                                             {:title (str "Exception " (inc idx))
-                                                              :component ($ ExceptionDetailModal {:title (str "Exception " (inc idx)) :content exc-str})}]))
-                                 :title "Click to view full exception"}
-                           ($ :div {:className "text-xs font-mono text-red-800"}
-                              first-line)))))))
-                 (when (and start-time finish-time)
-              ($ :div {:className "bg-yellow-50 p-3 rounded-md mt-4"}
-                 ($ :div {:className "text-sm font-medium text-yellow-700 mb-2"} "Timing")
-                 ($ :div {:className "space-y-1"}
-                    ($ :div {:className "flex justify-between"}
-                       ($ :span {:className "text-xs text-yellow-600"} "Duration")
-                       ($ :span {:className "text-xs text-yellow-600 font-mono"
-                                 :title (str "Started: " (format-ms start-time) "\nFinished: " (format-ms finish-time))}
-                          (str duration "ms")))
-                    ($ :div {:className "flex justify-between"}
-                       ($ :span {:className "text-xs text-yellow-600"} "Started")
-                       ($ :span {:className "text-xs text-yellow-600 font-mono"}
-                          (format-ms start-time)))
-                    ($ :div {:className "flex justify-between"}
-                       ($ :span {:className "text-xs text-yellow-600"} "Finished")
-                       ($ :span {:className "text-xs text-yellow-600 font-mono"}
-                          (format-ms finish-time))))))
-
-                 (when input
-              ($ :div {:className "bg-green-50 p-3 rounded-md mt-4"}
-                 ($ :div {:className "text-sm font-medium text-green-700 mb-1"} "Input")
-                 ($ generic-data-viewer {:data input
-                                         :color "green"
-                                         :truncate-length 100
-                                         :depth 0})))
-
-                 (when (not (empty? (:nested-ops data)))
-              ($ :div {:className "bg-sky-50 p-3 rounded-md mt-4"}
-                 ($ :div {:className "text-sm font-medium text-sky-700 mb-2"}
-                    (str "Operations (" (count (:nested-ops data)) ")"))
-                 ($ :div {:className "space-y-2"}
-                    (for [op (:nested-ops data)]
-                      (let [info (:info op)
-                            op-type (:type op)
-                            start-time (:start-time-millis op)
-                            finish-time (:finish-time-millis op)
-                            duration (when (and start-time finish-time)
-                                       (str (- finish-time start-time)))]
-                        ($ :div {:key (str (str start-time) "-" (str finish-time))
-                                 :className "bg-white p-3 rounded border border-sky-200"}
-
-                           ;; 1. The Header: Keep this part to display consistent op-level info
-                           ($ :div {:className (common/cn "flex justify-between items-start mb-2")}
-                              ($ :div {:className "flex-1"}
-                                 ($ :div {:className "flex items-center gap-2"}
-                                    ($ :span {:className "text-sm font-medium text-sky-800 bg-sky-100 px-2 py-1 rounded"}
-                                       op-type)
-                                    ;; The generic viewer will show objectName, so this is optional, but nice for a header
-                                    (when (:objectName info)
-                                      ($ :span {:className "text-sm font-mono text-sky-700"}
-                                         (:objectName info)))))
-                              ;; Always display the duration
-                              ($ :div {:className "flex items-center gap-2"}
-                                 ;; Always display the duration
-                                 (when duration
-                                   ($ :div {:className "text-xs text-sky-500 font-mono"
-                                            :title (str "Started: " (format-ms start-time) "\nFinished: " (format-ms finish-time))}
-                                      (str duration "ms")))
-                                 ;; Add navigation button for agent-call operations
-                                 (when (= (keyword op-type) :agent-call)
-                                   (let [invoke-data (if (= (str (:op info)) "initiate")
-                                                       (:result info)
-                                                       (:agent-invoke info))
-                                         task-id (:task-id invoke-data)
-                                         agent-invoke-id (:agent-invoke-id invoke-data)
-                                         module-id (:agent-module-name info)
-                                         agent-name (:agent-name info)
-                                         can-navigate? (and (not (nil? task-id)) (not (nil? agent-invoke-id)) module-id agent-name)
-                                         target-url (when can-navigate?
-                                                      (str "/agents/" (common/url-encode module-id)
-                                                           "/agent/" (common/url-encode agent-name)
-                                                           "/invocations/" task-id "-" agent-invoke-id))]
-                                     (when target-url
-                                       ($ :button {:onClick (fn [] (js/window.open target-url "_blank"))
-                                                   :className "inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold text-white bg-indigo-600 rounded hover:bg-indigo-700 transition-colors cursor-pointer shadow-sm"}
-                                          "View"
-                                          ($ ArrowTopRightOnSquareIcon {:className "h-3 w-3"})))))))
-
-                           ;; 2. The Body: Replace all specific logic with the generic viewer
-                           ($ :div {:className "text-xs text-sky-600 mt-1"}
-                              ($ generic-data-viewer {:data info :color "sky" :depth 0}))))))))
-
-                 (when (and emits (> (count emits) 0))
-              ($ :div {:className "mt-4 bg-purple-50 p-3 rounded-md"}
-                 ($ :div {:className "text-sm font-medium text-purple-700 mb-2"}
-                    (str "Emits (" (count emits) ")"))
-                 ($ :div {:className "space-y-2"}
-                    (for [[idx emit] (map-indexed vector (js->clj emits :keywordize-keys true))]
-                      (let [emit-id (str (:invoke-id emit))
-                            is-loaded (contains? graph-data (:invoke-id emit))
-                            ;; We no longer track loading state locally
-                            border-class (if is-loaded "border-purple-200" "border-dashed border-purple-300")
-                            cursor-class "cursor-pointer"
-                            bg-class (if is-loaded "bg-gray-50" "bg-white hover:bg-purple-50")]
-                        ($ :div {:key (str "emit-" idx)
-                                 :className (str bg-class " p-2 rounded border " border-class " " cursor-class " transition-colors")
-                                 :onClick (fn [e]
-                                            (.stopPropagation e)
-                                            (if is-loaded
-                                              ;; Find and select the loaded node
-                                              (let [nodes (js->clj flow-nodes :keywordize-keys true)
-                                                    target-node (->> nodes
-                                                                     (filter #(= (-> % :data :node-id) (:invoke-id emit)))
-                                                                     first)]
-                                                (when (and target-node on-select-node)
-                                                  (on-select-node (:invoke-id emit))))
-                                              ;; Load the unloaded node
-                                              (when on-paginate-node
-                                                (on-paginate-node emit-id))))}
-                           ($ :div {:className "text-xs text-purple-600"}
-                              ($ :div (str "→ " (:node-name emit)))
-                              (when (:args emit)
-                                ($ generic-data-viewer {:data (:args emit)
-                                                        :color "purple"
-                                                        :truncate-length 60
-                                                        :depth 0}))
-                              ($ :div {:className "text-purple-400 mt-1 font-mono text-xs"}
-                                 (str "ID: " emit-id))))))))))
-
+              ($ node-details-info-panel
+                 {:data data
+                  :hr hr
+                  :hr-invoke-id hr-invoke-id
+                  :hitl-response hitl-response
+                  :submitting? submitting?
+                  :module-id module-id
+                  :agent-name agent-name
+                  :invoke-id invoke-id
+                  :node-id node-id
+                  :node-name node-name
+                  :result result
+                  :exceptions exceptions
+                  :start-time start-time
+                  :finish-time finish-time
+                  :duration duration
+                  :input input
+                  :emits emits
+                  :graph-data graph-data
+                  :flow-nodes flow-nodes
+                  :on-select-node on-select-node
+                  :on-paginate-node on-paginate-node})
 
               :feedback
               ($ :div {:data-id "node-feedback-container"}
@@ -792,11 +852,41 @@
                                :is-live? is-live?})))
          ($ :p.text-sm.text-gray-500.italic "No metadata exists")))))
 
+(defui result-panel [{:keys [result summary-data module-id]}]
+  (when result
+    (let [failure? (:failure? result)
+          result-val (:val result)]
+      ($ :div {:className "bg-gray-50 p-3 rounded-lg border border-gray-200"
+               :data-id "final-result-section"}
+         ($ :div {:className "flex justify-between items-center mb-2"}
+            ($ :div {:className "text-sm font-medium text-gray-700"} "Final Result")
+            (if failure?
+              ($ :span {:className "px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium"} "Failed")
+              ($ :span {:className "px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium"} "Success")))
+         ($ common/ExpandableContent {:content result-val
+                                      :color (if failure? "red" "green")
+                                      :modal-title "Final Result Details"
+                                      :truncate-length 200
+                                      :on-expand (fn [{:keys [title content]}]
+                                                   (state/dispatch [:modal/show :content-detail
+                                                                    {:title title
+                                                                     :component ($ common/ContentDetailModal {:title title :content content})}]))})
+         ($ :div {:className "mt-4"}
+            ($ :button
+               {:className "w-full text-sm font-medium py-2 px-4 rounded-md transition-colors bg-green-100 text-green-800 hover:bg-green-200"
+                :onClick (fn []
+                           (let [input-data (:invoke-args summary-data)
+                                 output-data (:val (:result summary-data))]
+                             (state/dispatch [:modal/show-form :add-from-trace
+                                              {:module-id module-id
+                                               :title "Add Agent Invocation to Dataset"
+                                               :source-type :agent
+                                               :source-args input-data
+                                               :source-result output-data}])))}
+               "Add to Dataset"))))))
 
 (defui info-panel [{:keys [graph-data summary-data on-select-node module-id agent-name task-id forks fork-of invoke-id]}]
   (let [result (:result summary-data)
-        failure? (:failure? result)
-        result-val (:val result)
         feedback (:feedback summary-data)]
 
     ($ :div {:className "space-y-4"}
@@ -807,35 +897,9 @@
                          :forks forks
                          :fork-of fork-of})
 
-       (when result
-         ($ :div {:className "bg-gray-50 p-3 rounded-lg border border-gray-200"
-                  :data-id "final-result-section"}
-            ($ :div {:className "flex justify-between items-center mb-2"}
-               ($ :div {:className "text-sm font-medium text-gray-700"} "Final Result")
-               (if failure?
-                 ($ :span {:className "px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium"} "Failed")
-                 ($ :span {:className "px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium"} "Success")))
-            ($ common/ExpandableContent {:content result-val
-                                         :color (if failure? "red" "green")
-                                         :modal-title "Final Result Details"
-                                         :truncate-length 200
-                                         :on-expand (fn [{:keys [title content]}]
-                                                      (state/dispatch [:modal/show :content-detail
-                                                                       {:title title
-                                                                        :component ($ common/ContentDetailModal {:title title :content content})}]))})
-            ($ :div {:className "mt-4"}
-               ($ :button
-                  {:className "w-full text-sm font-medium py-2 px-4 rounded-md transition-colors bg-green-100 text-green-800 hover:bg-green-200"
-                   :onClick (fn []
-                              (let [input-data (:invoke-args summary-data)
-                                    output-data (:val (:result summary-data))]
-                                (state/dispatch [:modal/show-form :add-from-trace
-                                                 {:module-id module-id
-                                                  :title "Add Agent Invocation to Dataset"
-                                                  :source-type :agent
-                                                  :source-args input-data
-                                                  :source-result output-data}])))}
-                  "Add to Dataset"))))
+       ($ result-panel {:result result
+                        :summary-data summary-data
+                        :module-id module-id})
 
        ($ exceptions-panel {:summary-data summary-data
                             :graph-data graph-data
@@ -855,6 +919,69 @@
                                               :module-id module-id
                                               :agent-name agent-name}]))
                           :is-live? (not (:finish-time-millis summary-data))}))))
+
+(defui fork-panel [{:keys [changed-nodes graph-data affected-nodes flow-nodes on-select-node on-remove-node-change on-execute-fork on-clear-fork]}]
+  (if (empty? changed-nodes)
+    ($ :div {:className "text-gray-500 text-center py-8"
+             :data-id "fork-empty-state"}
+       "No changes yet. Select a node to edit its input.")
+
+    ($ :div {:className "space-y-3"
+             :data-id "fork-content"}
+       ;; Changed nodes list
+       ($ :div {:data-id "changed-nodes-list"}
+          (for [[node-id new-input] changed-nodes]
+            (let [node-data (get graph-data node-id)
+                  node-name (:node node-data)
+                  is-overridden (contains? affected-nodes node-id)
+                  handle-select-node (fn [e]
+                                       (.stopPropagation e)
+                                       ;; Find the corresponding flow node and select it
+                                       (let [nodes (js->clj flow-nodes :keywordize-keys true)
+                                             target-node (->> nodes
+                                                              (filter #(= (-> % :data :node-id) node-id))
+                                                              first)]
+                                         (when (and target-node on-select-node)
+                                           (on-select-node node-id))))]
+
+              ($ :div {:key node-id
+                       :className (common/cn "border rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow"
+                                             {"bg-yellow-50 border-yellow-300 hover:bg-yellow-100" is-overridden
+                                              "bg-gray-50 border-gray-200 hover:bg-gray-100" (not is-overridden)})
+                       :onClick handle-select-node}
+                 ($ :div {:className "flex justify-between items-start mb-2"}
+                    ($ :div
+                       ($ :div {:className "font-medium text-gray-800 text-sm flex items-center gap-2"}
+                          node-name)
+                       ($ :div {:className "text-xs text-gray-500 font-mono"} (str "ID: " node-id))
+                       (when is-overridden
+                         ($ :div {:className "bg-yellow-200 text-yellow-800 text-xs px-2 py-1 rounded mt-1 font-medium"}
+                            "⚠️ This change will not be reached")))
+                    ($ :button {:className "cursor-pointer text-red-500 hover:text-red-700 text-sm"
+                                :onClick (fn [e]
+                                           (.stopPropagation e)
+                                           (when on-remove-node-change
+                                             (on-remove-node-change node-id)))}
+                       "Remove"))
+
+                 ($ :div {:className "text-xs"}
+                    ($ :div {:className "text-gray-600 mb-1"} "New input:")
+                    ($ :div {:className "bg-white p-2 rounded border font-mono text-gray-800 break-all"}
+                       (if (> (count new-input) 100)
+                         (str (subs new-input 0 100) "...")
+                         new-input)))))))
+
+       ;; Action buttons
+       ($ :div {:className "pt-4 border-t border-gray-200 space-y-2"
+                :data-id "fork-action-buttons"}
+          ($ :button {:className "w-full font-medium py-2 px-4 rounded-md transition-colors bg-blue-600 hover:bg-blue-700 text-white"
+                      :data-id "execute-fork-button"
+                      :onClick on-execute-fork}
+             (str "Execute Fork (" (count changed-nodes) " changes)"))
+          ($ :button {:className "w-full bg-gray-300 hover:bg-gray-400 text-gray-700 font-medium py-2 px-4 rounded-md transition-colors"
+                      :data-id "clear-fork-button"
+                      :onClick on-clear-fork}
+             "Clear All Changes")))))
 
 (defui right-panel [{:keys [graph-data summary-data changed-nodes on-remove-node-change affected-nodes flow-nodes on-select-node on-execute-fork on-clear-fork forking-mode? on-toggle-forking-mode is-live
                             module-id agent-name task-id forks fork-of invoke-id]}]
@@ -919,67 +1046,14 @@
             :feedback ($ feedback/feedback-list {:feedback-data (:feedback summary-data)
                                                  :module-id module-id})
 
-            :fork (if (empty? changed-nodes)
-                    ($ :div {:className "text-gray-500 text-center py-8"
-                             :data-id "fork-empty-state"}
-                       "No changes yet. Select a node to edit its input.")
-
-                    ($ :div {:className "space-y-3"
-                             :data-id "fork-content"}
-                       ;; Changed nodes list
-                       ($ :div {:data-id "changed-nodes-list"}
-                          (for [[node-id new-input] changed-nodes]
-                            (let [node-data (get graph-data node-id)
-                                  node-name (:node node-data)
-                                  is-overridden (contains? affected-nodes node-id)
-                                  handle-select-node (fn [e]
-                                                       (.stopPropagation e)
-                                                       ;; Find the corresponding flow node and select it
-                                                       (let [nodes (js->clj flow-nodes :keywordize-keys true)
-                                                             target-node (->> nodes
-                                                                              (filter #(= (-> % :data :node-id) node-id))
-                                                                              first)]
-                                                         (when (and target-node on-select-node)
-                                                           (on-select-node node-id))))]
-
-                              ($ :div {:key node-id
-                                       :className (common/cn "border rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow"
-                                                             {"bg-yellow-50 border-yellow-300 hover:bg-yellow-100" is-overridden
-                                                              "bg-gray-50 border-gray-200 hover:bg-gray-100" (not is-overridden)})
-                                       :onClick handle-select-node}
-                                 ($ :div {:className "flex justify-between items-start mb-2"}
-                                    ($ :div
-                                       ($ :div {:className "font-medium text-gray-800 text-sm flex items-center gap-2"}
-                                          node-name)
-                                       ($ :div {:className "text-xs text-gray-500 font-mono"} (str "ID: " node-id))
-                                       (when is-overridden
-                                         ($ :div {:className "bg-yellow-200 text-yellow-800 text-xs px-2 py-1 rounded mt-1 font-medium"}
-                                            "⚠️ This change will not be reached")))
-                                    ($ :button {:className "cursor-pointer text-red-500 hover:text-red-700 text-sm"
-                                                :onClick (fn [e]
-                                                           (.stopPropagation e)
-                                                           (when on-remove-node-change
-                                                             (on-remove-node-change node-id)))}
-                                       "Remove"))
-
-                                 ($ :div {:className "text-xs"}
-                                    ($ :div {:className "text-gray-600 mb-1"} "New input:")
-                                    ($ :div {:className "bg-white p-2 rounded border font-mono text-gray-800 break-all"}
-                                       (if (> (count new-input) 100)
-                                         (str (subs new-input 0 100) "...")
-                                         new-input)))))))
-
-                       ;; Action buttons
-                       ($ :div {:className "pt-4 border-t border-gray-200 space-y-2"
-                                :data-id "fork-action-buttons"}
-                          ($ :button {:className "w-full font-medium py-2 px-4 rounded-md transition-colors bg-blue-600 hover:bg-blue-700 text-white"
-                                      :data-id "execute-fork-button"
-                                      :onClick on-execute-fork}
-                             (str "Execute Fork (" (count changed-nodes) " changes)"))
-                          ($ :button {:className "w-full bg-gray-300 hover:bg-gray-400 text-gray-700 font-medium py-2 px-4 rounded-md transition-colors"
-                                      :data-id "clear-fork-button"
-                                      :onClick on-clear-fork}
-                             "Clear All Changes")))))))))
+            :fork ($ fork-panel {:changed-nodes changed-nodes
+                                 :graph-data graph-data
+                                 :affected-nodes affected-nodes
+                                 :flow-nodes flow-nodes
+                                 :on-select-node on-select-node
+                                 :on-remove-node-change on-remove-node-change
+                                 :on-execute-fork on-execute-fork
+                                 :on-clear-fork on-clear-fork}))))))
 
 (defn process-graph-data
   "Applies Dagre layout to pre-processed nodes and edges."
