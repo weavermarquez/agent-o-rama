@@ -56,7 +56,8 @@
         :hitl {:responses {}
                :submitting {}}
         :datasets {:selected-examples {}
-                   :selected-snapshot-per-dataset {}}}
+                   :selected-snapshot-per-dataset {}}
+        :rules {:refetch-trigger {}}}
    :sente {:connected? false}})
 
 (defonce app-db (atom initial-db))
@@ -141,7 +142,7 @@
   "Subscribe to a value at the given path in app-db.
    The path may contain raw UUIDs - they will be converted to Specter navigators internally.
    Component will re-render only when the value at that path changes.
-   
+
    Example:
      (use-sub [:ui :datasets :selected-examples dataset-id])
    where dataset-id is a raw UUID object."
@@ -166,6 +167,13 @@
                             new-val (extract-value new-db)]
                         (when (not= old-val new-val)
                           (set-value new-val)))))
+
+         ;; Sync with current state immediately after adding watch
+         ;; This handles race conditions where the state changed between initial render and effect
+         (let [current-value (extract-value @app-db)]
+           (when (not= value current-value)
+             (set-value current-value)))
+
          ;; Cleanup function
          (fn []
            (remove-watch app-db watch-key))))

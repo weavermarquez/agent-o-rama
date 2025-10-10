@@ -71,7 +71,8 @@
    - :placeholder - Placeholder text
    - :class-name - Additional CSS classes
    - :rows - For textarea, number of rows"
-  [{:keys [label value on-change error required? placeholder class-name type rows]
+  [{:keys [label value on-change error required? placeholder class-name
+           type rows data-id]
     :or {type :text rows 3}}]
 
   (let [input-classes (str "w-full p-3 border rounded-md text-sm transition-colors "
@@ -90,20 +91,24 @@
 
        (case type
          :textarea
-         ($ :textarea {:id field-id
-                       :className input-classes
-                       :value (or value "")
-                       :placeholder placeholder
-                       :rows rows
-                       :onChange #(on-change (.. % -target -value))})
+         ($ :textarea
+            (cond-> {:id field-id
+                     :className input-classes
+                     :value (or value "")
+                     :placeholder placeholder
+                     :rows rows
+                     :onChange #(on-change (.. % -target -value))}
+              data-id (assoc :data-id data-id)))
 
          ;; Default to text input for all other types
-         ($ :input {:id field-id
-                    :type (name type)
-                    :className input-classes
-                    :value (or value "")
-                    :placeholder placeholder
-                    :onChange #(on-change (.. % -target -value))}))
+         ($ :input
+            (cond-> {:id field-id
+                     :type (name type)
+                     :className input-classes
+                     :value (or value "")
+                     :placeholder placeholder
+                     :onChange #(on-change (.. % -target -value))}
+              data-id (assoc :data-id data-id))))
 
        (if error
          ($ :p.text-sm.text-red-600.mt-1 error)
@@ -111,7 +116,7 @@
 
 (defui form-error
   "Reusable error display component.
-   
+
    Props:
    - :error - Error message to display
    - :class-name - Additional CSS classes"
@@ -203,8 +208,12 @@
                              :className (str "px-4 py-2 border border-transparent rounded-md text-sm font-medium "
                                              (if (not (:valid? form)) "text-gray-400 bg-gray-300 cursor-not-allowed" "text-white bg-blue-600 hover:bg-blue-700 cursor-pointer"))}
                     "Next")
-                 ($ :button {:type "button", :disabled (or (not (:valid? form)) (:submitting? form) (:error form)), :onClick (:submit! form)
-                             :className (str "px-4 py-2 border border-transparent rounded-md text-sm font-medium flex items-center gap-2 "
+                 ($ :button
+                    {:type "button"
+                     :disabled (or (not (:valid? form)) (:submitting? form) (:error form))
+                     :onClick (:submit! form)
+                     :data-id "form-submit"
+                     :className (str "px-4 py-2 border border-transparent rounded-md text-sm font-medium flex items-center gap-2 "
                                              (if (or (not (:valid? form)) (:submitting? form) (:error form)) "text-gray-400 bg-gray-300 cursor-not-allowed" "text-white bg-blue-600 hover:bg-blue-700 cursor-pointer"))}
                     (when (:submitting? form) ($ common/spinner {:size :medium}))
                     (:submit-text modal-data "Submit")))))))))
@@ -253,7 +262,8 @@
 
              ;; Wrap component in proper scrollable container
              (when (:component data)
-               ($ :div {:className "flex-1 min-h-0 overflow-y-auto"}
+               ($ :div {:className "flex-1 min-h-0 overflow-y-auto"
+                        :data-id "form-container"}
                   (:component data)))))
        (.-body js/document)))))
 
@@ -286,7 +296,7 @@
 (defn- validate-form-fields
   "Validate fields against validators keyed by Specter paths.
    Returns a map {:valid? boolean :errors {nested-error-map}}
-   
+
    The form-state contains both field data and metadata. We need to extract
    only the field data for validation by excluding known metadata keys."
   [form-state validators]
@@ -491,5 +501,3 @@
                                                 :data {}
                                                 :form {:submitting? false
                                                        :error nil}})]))
-
-

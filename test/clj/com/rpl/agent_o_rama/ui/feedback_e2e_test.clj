@@ -11,6 +11,8 @@
 
 (def ^:private default-timeout 120)
 
+(defonce system (volatile! nil))
+
 ;;; Helper functions
 
 (defn make-post-deploy-hook
@@ -40,17 +42,18 @@
   ;; Test agent-level feedback display in the main Feedback tab.
   ;; Uses feedback-test-agent which generates agent-level evaluator feedback.
   (eth/with-system
-    [FeedbackTestAgentModule
+    [system FeedbackTestAgentModule
      {:post-deploy-hook (make-post-deploy-hook {:include-node-rules? false})}]
-    (eth/with-webdriver [driver]
+    (eth/with-webdriver [system driver]
       (testing "agent-level feedback displays correctly"
-        (let [env    @eth/system
+        (let [env    @system
               agent  (aor/agent-client
                       (aor/agent-manager (:ipc env) (:module-name env))
                       "FeedbackTestAgent")
               invoke (aor/agent-initiate agent {"mode" "medium" "text" "test"})]
 
-          @(aor/agent-result-async agent invoke)
+          (aor/agent-result agent invoke)
+          (Thread/sleep 5000)
 
           (e/with-postmortem driver {:dir "target/etaoin"}
             (let [trace-url (eth/agent-invoke-url
@@ -60,15 +63,8 @@
               (wait-for-feedback driver trace-url)
               (eth/wait-visible driver "feedback-tab")
 
-              (testing "feedback tab exists"
-                (is (e/visible? driver {:data-id "feedback-tab"})))
-
               (testing "switch to feedback tab"
-                (e/click driver {:data-id "feedback-tab"})
-                (e/wait-visible driver {:data-id "feedback-list"} {:timeout 2}))
-
-              (testing "feedback list is visible"
-                (is (e/visible? driver {:data-id "feedback-list"})))
+                (eth/wait-visible driver "feedback-list"))
 
               (testing "has multiple feedback items from agent-level evaluators"
                 (is (e/exists? driver {:data-id "feedback-item-0"}))
@@ -81,10 +77,10 @@
   ;; Test node-level feedback display in node details Feedback tab.
   ;; Uses feedback-test-agent which generates node-level evaluator feedback.
   (eth/with-system
-    [FeedbackTestAgentModule {:post-deploy-hook (make-post-deploy-hook {})}]
-    (eth/with-webdriver [driver]
+    [system FeedbackTestAgentModule {:post-deploy-hook (make-post-deploy-hook {})}]
+    (eth/with-webdriver [system driver]
       (testing "node-level feedback displays correctly"
-        (let [env    @eth/system
+        (let [env    @system
               agent  (aor/agent-client
                       (aor/agent-manager (:ipc env) (:module-name env))
                       "FeedbackTestAgent")
@@ -121,10 +117,10 @@
 (deftest ^:integration empty-feedback-state-test
   ;; Test empty state display when no feedback is present.
   ;; Uses an agent run without any evaluator rules configured.
-  (eth/with-system [FeedbackTestAgentModule]
-    (eth/with-webdriver [driver]
+  (eth/with-system [system FeedbackTestAgentModule]
+    (eth/with-webdriver [system driver]
       (testing "empty feedback state displays correctly"
-        (let [env    @eth/system
+        (let [env    @system
               agent  (aor/agent-client
                       (aor/agent-manager (:ipc env) (:module-name env))
                       "FeedbackTestAgent")
@@ -157,10 +153,10 @@
   ;; Test display of different score types (boolean and numeric).
   ;; Uses feedback-test-agent evaluators that return different score formats.
   (eth/with-system
-    [FeedbackTestAgentModule {:post-deploy-hook (make-post-deploy-hook {})}]
-    (eth/with-webdriver [driver]
+    [system FeedbackTestAgentModule {:post-deploy-hook (make-post-deploy-hook {})}]
+    (eth/with-webdriver [system driver]
       (testing "feedback scores display with correct types"
-        (let [env    @eth/system
+        (let [env    @system
               agent  (aor/agent-client
                       (aor/agent-manager (:ipc env) (:module-name env))
                       "FeedbackTestAgent")
@@ -178,10 +174,6 @@
               (wait-for-feedback driver trace-url)
               (eth/wait-visible driver "feedback-tab")
 
-              (testing "switch to feedback tab"
-                (e/click driver {:data-id "feedback-tab"})
-                (eth/wait-visible driver "feedback-list"))
-
               (testing "feedback items display"
                 (is (e/visible? driver {:data-id "feedback-item-0"})))
 
@@ -198,10 +190,10 @@
   ;; Test that feedback from multiple evaluators displays together.
   ;; Uses both agent-level and node-level evaluators.
   (eth/with-system
-    [FeedbackTestAgentModule {:post-deploy-hook (make-post-deploy-hook {})}]
-    (eth/with-webdriver [driver]
+    [system FeedbackTestAgentModule {:post-deploy-hook (make-post-deploy-hook {})}]
+    (eth/with-webdriver [system driver]
       (testing "multiple feedback sources display together"
-        (let [env    @eth/system
+        (let [env    @system
               agent  (aor/agent-client
                       (aor/agent-manager (:ipc env) (:module-name env))
                       "FeedbackTestAgent")

@@ -2,29 +2,31 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [com.rpl.agent-o-rama :as aor]
-   [com.rpl.agent-o-rama.ui.etaoin-test-helpers :as helpers]
+   [com.rpl.agent-o-rama.ui.etaoin-test-helpers :as eth]
    [com.rpl.agent-o-rama.ui.trace-analytics-test-agent
     :refer [TraceAnalyticsTestAgentModule]]
    [etaoin.api :as e]))
 
-(def ^:private default-timeout 120)
+(defonce system (volatile! nil))
+;; (eth/teardown-system system)
+;; (vreset! system nil)
 
 (deftest ^:integration conditional-rendering-test
   ;; Test conditional rendering of stat sections based on available data
-  (helpers/with-system [TraceAnalyticsTestAgentModule]
-    (helpers/with-webdriver [driver]
+  (eth/with-system [system TraceAnalyticsTestAgentModule]
+    (eth/with-webdriver [system driver]
       (testing "basic mode shows only execution time"
-        (let [env     @helpers/system
+        (let [env     @system
               manager (aor/agent-manager (:ipc env) (:module-name env))
               agent   (aor/agent-client manager "TraceTestAgent")
               invoke  (aor/agent-initiate agent {"mode" "basic"})]
 
-          @(aor/agent-result-async agent invoke)
+          (aor/agent-result agent invoke)
 
           (e/with-postmortem driver {:dir "target/etaoin"}
-            (let [trace-url (helpers/agent-invoke-url env "TraceTestAgent" invoke)]
+            (let [trace-url (eth/agent-invoke-url env "TraceTestAgent" invoke)]
               (e/go driver trace-url)
-              (e/wait-visible driver {:data-id "trace-analytics"} {:timeout default-timeout})
+              (e/wait-visible driver {:data-id "trace-analytics"} {:timeout eth/default-timeout})
 
               (testing "shows execution time"
                 (is (e/visible? driver {:data-id "execution-time"})))
@@ -38,16 +40,16 @@
                 (is (not (e/exists? driver {:data-id "other-operations"}))))))))
 
       (testing "db mode shows db-operations section"
-        (let [env     @helpers/system
+        (let [env     @system
               manager (aor/agent-manager (:ipc env) (:module-name env))
               agent   (aor/agent-client manager "TraceTestAgent")
               invoke  (aor/agent-initiate agent {"mode" "db"})]
 
           @(aor/agent-result-async agent invoke)
 
-          (let [trace-url (helpers/agent-invoke-url env "TraceTestAgent" invoke)]
+          (let [trace-url (eth/agent-invoke-url env "TraceTestAgent" invoke)]
             (e/go driver trace-url)
-            (e/wait-visible driver {:data-id "trace-analytics"} {:timeout default-timeout})
+            (e/wait-visible driver {:data-id "trace-analytics"} {:timeout eth/default-timeout})
 
             (testing "shows db-operations section"
               (is (e/visible? driver {:data-id "db-operations"}))
@@ -62,7 +64,7 @@
               (is (not (e/exists? driver {:data-id "tokens"})))))))
 
       (testing "store mode shows store-operations section"
-        (let [env     @helpers/system
+        (let [env     @system
               manager (aor/agent-manager (:ipc env) (:module-name env))
               agent   (aor/agent-client manager "TraceTestAgent")
               invoke  (aor/agent-initiate agent {"mode" "store"})]
@@ -70,12 +72,12 @@
           @(aor/agent-result-async agent invoke)
 
           (e/with-postmortem driver {:dir "target/etaoin"}
-            (let [trace-url (helpers/agent-invoke-url env "TraceTestAgent" invoke)]
+            (let [trace-url (eth/agent-invoke-url env "TraceTestAgent" invoke)]
               (e/go driver trace-url)
               (e/wait-visible
                driver
                {:data-id "trace-analytics"}
-               {:timeout default-timeout})
+               {:timeout eth/default-timeout})
 
               (testing "shows store-operations section"
                 (is (e/visible? driver {:data-id "store-operations"}))
@@ -90,19 +92,19 @@
                 (is (not (e/exists? driver {:data-id "tokens"}))))))))
 
       (testing "other mode shows other-operations section"
-        (let [env     @helpers/system
+        (let [env     @system
               manager (aor/agent-manager (:ipc env) (:module-name env))
               agent   (aor/agent-client manager "TraceTestAgent")
               invoke  (aor/agent-initiate agent {"mode" "other"})]
 
           @(aor/agent-result-async agent invoke)
 
-          (let [trace-url (helpers/agent-invoke-url env "TraceTestAgent" invoke)]
+          (let [trace-url (eth/agent-invoke-url env "TraceTestAgent" invoke)]
             (e/go driver trace-url)
             (e/wait-visible
              driver
              {:data-id "trace-analytics"}
-             {:timeout default-timeout})
+             {:timeout eth/default-timeout})
 
             (testing "shows other-operations section"
               (is (e/visible? driver {:data-id "other-operations"}))
@@ -113,10 +115,10 @@
 
 (deftest ^:integration dropdown-toggle-test
   ;; Test dropdown expand/collapse functionality
-  (helpers/with-system [TraceAnalyticsTestAgentModule]
-    (helpers/with-webdriver [driver]
+  (eth/with-system [system TraceAnalyticsTestAgentModule]
+    (eth/with-webdriver [system driver]
       (testing "node-stats dropdown toggles correctly"
-        (let [env     @helpers/system
+        (let [env     @system
               manager (aor/agent-manager (:ipc env) (:module-name env))
               agent   (aor/agent-client manager "TraceTestAgent")
               invoke  (aor/agent-initiate agent {"mode" "basic"})]
@@ -124,12 +126,12 @@
           @(aor/agent-result-async agent invoke)
 
           (e/with-postmortem driver {:dir "target/etaoin"}
-            (let [trace-url (helpers/agent-invoke-url env "TraceTestAgent" invoke)]
+            (let [trace-url (eth/agent-invoke-url env "TraceTestAgent" invoke)]
               (e/go driver trace-url)
               (e/wait-visible
                driver
                {:data-id "trace-analytics"}
-               {:timeout default-timeout})
+               {:timeout eth/default-timeout})
 
               (testing "node-stats section exists"
                 (is (e/visible? driver {:data-id "node-stats"})))
@@ -152,7 +154,7 @@
                      (e/visible? driver {:data-id "node-stats-list"}))))))))
 
       (testing "other-operations dropdown toggles correctly"
-        (let [env     @helpers/system
+        (let [env     @system
               manager (aor/agent-manager (:ipc env) (:module-name env))
               agent   (aor/agent-client manager "TraceTestAgent")
               invoke  (aor/agent-initiate agent {"mode" "other"})]
@@ -160,12 +162,12 @@
           @(aor/agent-result-async agent invoke)
 
           (e/with-postmortem driver {:dir "target/etaoin"}
-            (let [trace-url (helpers/agent-invoke-url env "TraceTestAgent" invoke)]
+            (let [trace-url (eth/agent-invoke-url env "TraceTestAgent" invoke)]
               (e/go driver trace-url)
               (e/wait-visible
                driver
                {:data-id "trace-analytics"}
-               {:timeout default-timeout})
+               {:timeout eth/default-timeout})
 
               (testing "initially collapsed"
                 (is (not (e/visible? driver {:data-id "other-operations-list"}))))
@@ -189,19 +191,19 @@
                      (e/visible? driver {:data-id "other-operations-list"}))))))))
 
       (testing "subagent-stats dropdown toggles correctly"
-        (let [env     @helpers/system
+        (let [env     @system
               manager (aor/agent-manager (:ipc env) (:module-name env))
               agent   (aor/agent-client manager "TraceTestAgent")
               invoke  (aor/agent-initiate agent {"mode" "sub-agent"})]
 
           @(aor/agent-result-async agent invoke)
 
-          (let [trace-url (helpers/agent-invoke-url env "TraceTestAgent" invoke)]
+          (let [trace-url (eth/agent-invoke-url env "TraceTestAgent" invoke)]
             (e/go driver trace-url)
             (e/wait-visible
              driver
              {:data-id "trace-analytics"}
-             {:timeout default-timeout})
+             {:timeout eth/default-timeout})
 
             (testing "initially collapsed"
               (is (not (e/visible? driver {:data-id "subagent-stats-list"}))))
@@ -251,10 +253,10 @@
   ;; Test trace analytics with model calls and token tracking
   (testing "Trace analytics with chat model mode"
     (when (System/getenv "OPENAI_API_KEY")
-      (helpers/with-system [TraceAnalyticsTestAgentModule]
-        (helpers/with-webdriver [driver]
+      (eth/with-system [system TraceAnalyticsTestAgentModule]
+        (eth/with-webdriver [system driver]
           (testing "chat mode shows model-calls and tokens sections"
-            (let [env     @helpers/system
+            (let [env     @system
                   manager (aor/agent-manager (:ipc env) (:module-name env))
                   agent   (aor/agent-client manager "TraceTestAgent")
                   invoke  (aor/agent-initiate agent
@@ -264,12 +266,12 @@
               @(aor/agent-result-async agent invoke)
 
               (e/with-postmortem driver {:dir "target/etaoin"}
-                (let [trace-url (helpers/agent-invoke-url env "TraceTestAgent" invoke)]
+                (let [trace-url (eth/agent-invoke-url env "TraceTestAgent" invoke)]
                   (e/go driver trace-url)
                   (e/wait-visible
                    driver
                    {:data-id "trace-analytics"}
-                   {:timeout default-timeout})
+                   {:timeout eth/default-timeout})
 
                   (testing "shows model-calls section"
                     (is (e/visible? driver {:data-id "model-calls"}))

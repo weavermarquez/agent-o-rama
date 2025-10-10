@@ -16,36 +16,29 @@
     UserMessage]))
 
 (defn start-repl
-  [ipc]
+  [ipc & {:keys [port build-id] :or {port 1974 build-id :frontend}}]
   (shadow.cljs.devtools.server/start!)
-  (shadow/watch :frontend)
-  (aor/start-ui ipc))
+  (shadow/watch build-id)
+  (aor/start-ui ipc {:port port}))
 
 (defn stop-repl
   [ipc]
   (aor/stop-ui)
   (close! ipc))
 
-(defn start-dev!
-  [ipc]
-  (shadow.cljs.devtools.server/start!)
-  (shadow/watch :dev)
-  (shadow/nrepl-select :dev)
-  (aor/start-ui ipc))
-
 (defn launch-for-playwright
   "playwright tests assume these modules are launched.
   unfortunately, research module needs OPENAI_API_KEY, and TAVILY_API_KEY in env
   TODO port test to different module"
   [ipc]
-  
+
   (start-repl ipc)
-  
+
   (rtest/launch-module!
    ipc
    basic-agent/BasicAgentModule
    {:tasks 1 :threads 1})
-  
+
   (rtest/launch-module!
    ipc
    research-agent/ResearchAgentModule
@@ -65,10 +58,34 @@
   (start-repl ipc)
   (stop-repl ipc)
 
-  (start-dev! ipc)
-
   (shadow.cljs.devtools.server/stop!)
   (shadow.cljs.devtools.server/reload!)
+  (shadow/watch :dev)
+
+  (start-repl ipc {:port 1975 :build-id :dev})
+
+  ;; (shadow/watch :dev2)
+  ;; (shadow/nrepl-select :dev2)
+
+  (require 'com.rpl.agent-o-rama.ui.rules-test-agent)
+  (rtest/launch-module!
+   ipc
+   com.rpl.agent-o-rama.ui.rules-test-agent/RulesTestAgentModule
+   {:tasks 1 :threads 1})
+  (rtest/destroy-module!
+   ipc
+   (get-module-name
+    com.rpl.agent-o-rama.ui.rules-test-agent/RulesTestAgentModule))
+  (let [agent-manager
+        (aor/agent-manager
+         ipc
+         (get-module-name
+          com.rpl.agent-o-rama.ui.rules-test-agent/RulesTestAgentModule))
+        global-actions-depot (:global-actions-depot
+                              (aor-types/underlying-objects agent-manager))]
+    (com.rpl.agent-o-rama.ui.rules-test-agent/setup-rules-testing!
+     agent-manager
+     global-actions-depot))
 
   (require 'com.rpl.agent-o-rama.ui.feedback-test-agent)
   (rtest/launch-module!
@@ -160,4 +177,4 @@
 
 
   (shadow/compile :frontend)
-  )
+)
