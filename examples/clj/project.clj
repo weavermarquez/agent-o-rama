@@ -29,8 +29,8 @@
                         :dependencies   [[meander/epsilon "0.0.650"]]}
              :provided {:dependencies
                         [[com.rpl/rama "1.2.0"]
-                         [org.apache.logging.log4j/log4j-slf4j18-impl
-                          "2.16.0"]]}
+                         [org.apache.logging.log4j/log4j-slf4j2-impl
+                          "2.25.1"]]}
              :test     {:resource-paths ["test/resources/"]
                         :src-paths      ["src" "test"]
                         :dependencies   [[meander/epsilon "0.0.650"]]}}
