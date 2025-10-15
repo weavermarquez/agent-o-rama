@@ -75,8 +75,7 @@
              :examples {:test-paths   ["examples/clj/test"]
                         :source-paths ["examples/clj/src"]}
              :provided {:dependencies
-                        ;; TODO: fix Rama version
-                        [[com.rpl/rama "0.0.6-SNAPSHOT"]
+                        [[com.rpl/rama "1.2.0"]
                          [org.apache.logging.log4j/log4j-slf4j18-impl
                           "2.16.0"]]}
              :gen      {:prep-tasks   []
