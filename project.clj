@@ -62,7 +62,7 @@
                         :test-paths        ["test/clj"]
                         :java-source-paths ["src/java" "test/java"]
                         :dependencies
-                        [[org.clojure/clojure "1.12.0"]
+                        [[org.clojure/clojure "1.12.2"]
                          [meander/epsilon "0.0.650"]
                          [dev.langchain4j/langchain4j-open-ai "1.4.0"]
                          [dev.langchain4j/langchain4j-web-search-engine-tavily
@@ -81,7 +81,7 @@
              :gen      {:prep-tasks   []
                         :source-paths ["scripts"]
                         :dependencies [[comb "0.1.1"]
-                                       [org.clojure/clojure "1.12.0"]]}
+                                       [org.clojure/clojure "1.12.2"]]}
              :ui       {:source-paths ["test/cljs"]
                         :dependencies [[com.rpl/specter "1.1.4"] ;; only cljs
                                        [com.pitch/uix.core "1.4.3"]
@@ -92,7 +92,7 @@
                                        [metosin/reitit-malli "0.7.2"]
                                        ;; to fix dynlink error on arm macs
                                        [net.java.dev.jna/jna "5.17.0"]
-                                       [org.clojure/clojure "1.12.0"]
+                                       [org.clojure/clojure "1.12.2"]
                                        [prismatic/schema "1.4.1"]]}
              :test     {:jvm-opts ["-Daor.test.runner=1"]}}
   :codox {:source-paths ["src/clj"]
