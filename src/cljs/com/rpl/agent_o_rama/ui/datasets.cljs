@@ -693,43 +693,63 @@
                ($ :tbody
                   (into []
                         (for [dataset datasets
-                              :let [name (:name dataset)
+                              :let [is-remote? (:remote? dataset)
+                                    name (:name dataset)
                                     desc (:description dataset)
                                     dsid (:dataset-id dataset)
-                                    href (get-dataset-path module-id dsid)]]
+                                    href (get-dataset-path module-id dsid)
+                                    ;; Format remote description
+                                    remote-desc (when is-remote?
+                                                  (let [host (:remote-host dataset)
+                                                        port (:remote-port dataset)
+                                                        module (:remote-module-name dataset)]
+                                                    (cond
+                                                      (and host port) (str host ":" port " " module)
+                                                      host (str host " " module)
+                                                      :else module)))]]
                           ($ :tr {:key dsid
-                                  :className "hover:bg-gray-50 cursor-pointer"
+                                  :className (common/cn "hover:bg-gray-50 cursor-pointer"
+                                                        {"bg-purple-50" is-remote?})
                                   :onClick (fn [_]
                                              (rfe/push-state :module/dataset-detail.examples
                                                              {:module-id module-id
                                                               :dataset-id dsid}))}
                              ($ :td {:className (:td common/table-classes)}
-                                ($ :a.text-indigo-600.hover:text-indigo-800 {:href href} name))
+                                (if is-remote?
+                                  ($ :div.flex.flex-col.gap-1
+                                     ($ :span.text-purple-700.font-semibold.uppercase.text-xs "REMOTE DATASET")
+                                     ($ :span.text-xs.text-gray-600 name))
+                                  ($ :a.text-indigo-600.hover:text-indigo-800 {:href href} name)))
                              ($ :td {:className (:td common/table-classes)}
-                                (if (seq (str desc))
-                                  ($ :span.text-sm.text-gray-600.desc.truncate {:title desc} desc)
-                                  ($ :span.text-sm.text-gray-400.italic "—")))
+                                (if is-remote?
+                                  ($ :span.text-sm.text-purple-600.font-mono remote-desc)
+                                  (if (seq (str desc))
+                                    ($ :span.text-sm.text-gray-600.desc.truncate {:title desc} desc)
+                                    ($ :span.text-sm.text-gray-400.italic "—"))))
                              ($ :td {:className (:td common/table-classes)}
-                                ($ :span.text-sm.text-gray-600 {:title (common/format-timestamp (:created-at dataset))}
-                                   (common/format-relative-time (:created-at dataset))))
+                                (when-not is-remote?
+                                  ($ :span.text-sm.text-gray-600 {:title (common/format-timestamp (:created-at dataset))}
+                                     (common/format-relative-time (:created-at dataset)))))
                              ($ :td {:className (:td common/table-classes)}
-                                ($ :span.text-sm.text-gray-600 {:title (common/format-timestamp (:modified-at dataset))}
-                                   (common/format-relative-time (:modified-at dataset))))
+                                (when-not is-remote?
+                                  ($ :span.text-sm.text-gray-600 {:title (common/format-timestamp (:modified-at dataset))}
+                                     (common/format-relative-time (:modified-at dataset)))))
                              ($ :td {:className (:td-right common/table-classes)}
                                 ($ :div.flex.items-center.space-x-2
-                                   ($ :button.inline-flex.items-center.px-2.py-1.text-xs.text-gray-500.hover:text-gray-700.cursor-pointer
-                                      {:onClick (fn [e]
-                                                  (.preventDefault e)
-                                                  (.stopPropagation e)
-                                                  (state/dispatch [:modal/show-form :edit-dataset
-                                                                   {:module-id module-id
-                                                                    :dataset-id dsid
-                                                                    :name name
-                                                                    :description desc
-                                                                    :initial-name name
-                                                                    :initial-description desc}]))}
-                                      ($ PencilIcon {:className "h-4 w-4 mr-1"})
-                                      "Edit")
+                                   (when-not is-remote?
+                                     ($ :button.inline-flex.items-center.px-2.py-1.text-xs.text-gray-500.hover:text-gray-700.cursor-pointer
+                                        {:onClick (fn [e]
+                                                    (.preventDefault e)
+                                                    (.stopPropagation e)
+                                                    (state/dispatch [:modal/show-form :edit-dataset
+                                                                     {:module-id module-id
+                                                                      :dataset-id dsid
+                                                                      :name name
+                                                                      :description desc
+                                                                      :initial-name name
+                                                                      :initial-description desc}]))}
+                                        ($ PencilIcon {:className "h-4 w-4 mr-1"})
+                                        "Edit"))
                                    ($ :button.inline-flex.items-center.px-2.py-1.text-xs.text-gray-500.hover:text-red-700.cursor-pointer
                                       {:onClick (fn [e]
                                                   (.preventDefault e)
@@ -801,6 +821,59 @@
 ;; =============================================================================
 ;; DATASET DETAIL EXAMPLES TAB COMPONENT
 ;; =============================================================================
+
+;; =============================================================================
+;; REMOTE DATASET VIEW COMPONENT
+;; =============================================================================
+
+(defui remote-detail-view [{:keys [dataset]}]
+  ($ :div.h-full.flex.items-center.justify-center.p-6
+     ($ :div.max-w-2xl.bg-purple-50.border.border-purple-200.rounded-lg.p-8
+        ($ :div.flex.items-start.gap-4
+           ($ InformationCircleIcon {:className "h-12 w-12 text-purple-600 flex-shrink-0"})
+           ($ :div.flex-1
+              ($ :h2.text-2xl.font-bold.text-purple-900.mb-4 "This is a Remote Dataset")
+              ($ :div.space-y-4.text-gray-700
+                 ($ :p.text-base
+                    "The examples for this dataset reside on a different cluster and cannot be viewed or edited here.")
+                 ($ :p.text-base
+                    "However, you can run experiments with your local agents against this remote data by navigating to the "
+                    ($ :span.font-semibold "Experiments")
+                    " tab above.")
+                 (when-let [module-name (:module-name dataset)]
+                   ($ :div.mt-6.pt-6.border-t.border-purple-200
+                      ($ :h3.text-sm.font-semibold.text-purple-800.mb-2 "Remote Dataset Information")
+                      ($ :div.space-y-2.text-sm
+                         ($ :div.flex.gap-2
+                            ($ :span.font-medium "Module:")
+                            ($ :span.font-mono.text-purple-700 module-name))
+                         (when-let [host (:remote-host dataset)]
+                           ($ :div.flex.gap-2
+                              ($ :span.font-medium "Host:")
+                              ($ :span.font-mono.text-purple-700 host)))
+                         (when-let [port (:remote-port dataset)]
+                           ($ :div.flex.gap-2
+                              ($ :span.font-medium "Port:")
+                              ($ :span.font-mono.text-purple-700 (str port)))))))))))))
+
+;; =============================================================================
+;; EXAMPLES TAB ROUTER (for local vs remote datasets)
+;; =============================================================================
+
+(defui detail-examples-router [{:keys [module-id dataset-id]}]
+  (let [{:keys [data loading? error]}
+        (queries/use-sente-query
+         {:query-key [:dataset-props module-id dataset-id]
+          :sente-event [:datasets/get-props {:module-id module-id :dataset-id dataset-id}]
+          :enabled? (boolean (and module-id dataset-id))})
+        dataset data
+        is-remote? (boolean (:module-name dataset))]
+    (cond
+      loading? ($ :div.p-6 "Loading dataset details...")
+      error ($ :div.p-6.text-red-500 "Error loading dataset details")
+      (not dataset) ($ :div.p-6.text-gray-500 "Dataset not found")
+      is-remote? ($ remote-detail-view {:dataset dataset})
+      :else ($ detail-examples {:module-id module-id :dataset-id dataset-id}))))
 
 (defui detail-examples [{:keys [module-id dataset-id]}]
   (let [;; Get selected examples for this dataset
@@ -994,7 +1067,8 @@
           :sente-event [:datasets/get-props {:module-id module-id :dataset-id dataset-id}]
           :enabled? (boolean (and module-id dataset-id))})
         ;; not sure about doing it this way, why not. maybe we can eventually decouple fetching from views?
-        dataset (state/use-sub [:queries :dataset-props module-id dataset-id :data])]
+        dataset (state/use-sub [:queries :dataset-props module-id dataset-id :data])
+        is-remote? (boolean (:module-name dataset))]
     ($ :div.h-full.flex.flex-col
        (cond
          loading? ($ :div.p-6 "Loading dataset details...")
@@ -1002,24 +1076,38 @@
          dataset
          ($ :div.h-full.flex.flex-col
             ;; Header Bar for the whole dataset page
-            ($ :div.bg-white.px-6.py-4
-               ($ :div.flex.items-center.justify-between
-                  ;; Left side - Title and info
-                  ($ :div.flex.items-center.space-x-4
-                     ($ :h1.text-2xl.font-bold.text-gray-900 (:name dataset))
-                     ;; Details button with conditional chevron
-                     ($ :button.inline-flex.items-center.px-3.py-1.text-sm.text-gray-600.hover:text-gray-800.rounded-md.hover:bg-gray-100.cursor-pointer
-                        {:onClick #(set-show-info (not show-info?))
-                         :title (if show-info? "Hide Dataset Information" "Show Dataset Information")}
-                        ($ :span.mr-1 "Details")
-                        (if show-info?
-                          ($ ChevronUpIcon {:className "h-4 w-4"})
-                          ($ ChevronDownIcon {:className "h-4 w-4"}))))
-                  ;; Right side - reserved for actions
-                  ($ :div.flex.items-center.space-x-4)))
+            (if is-remote?
+              ;; Remote dataset header - show connection info
+              ($ :div.bg-purple-50.border-b.border-purple-200.px-6.py-4
+                 ($ :div.flex.items-center.gap-3
+                    ($ :span.text-sm.font-semibold.text-purple-700.uppercase "Remote Dataset:")
+                    ($ :span.font-mono.text-purple-900
+                       (let [host (:remote-host dataset)
+                             port (:remote-port dataset)
+                             module (:module-name dataset)]
+                         (cond
+                           (and host port) (str host ":" port " / " module)
+                           host (str host " / " module)
+                           :else module)))))
+              ;; Local dataset header - show title and details
+              ($ :div.bg-white.px-6.py-4
+                 ($ :div.flex.items-center.justify-between
+                    ;; Left side - Title and info
+                    ($ :div.flex.items-center.space-x-4
+                       ($ :h1.text-2xl.font-bold.text-gray-900 (:name dataset))
+                       ;; Details button with conditional chevron
+                       ($ :button.inline-flex.items-center.px-3.py-1.text-sm.text-gray-600.hover:text-gray-800.rounded-md.hover:bg-gray-100.cursor-pointer
+                          {:onClick #(set-show-info (not show-info?))
+                           :title (if show-info? "Hide Dataset Information" "Show Dataset Information")}
+                          ($ :span.mr-1 "Details")
+                          (if show-info?
+                            ($ ChevronUpIcon {:className "h-4 w-4"})
+                            ($ ChevronDownIcon {:className "h-4 w-4"}))))
+                    ;; Right side - reserved for actions
+                    ($ :div.flex.items-center.space-x-4))))
 
-            ;; Collapsible info panel
-            (when show-info?
+            ;; Collapsible info panel (only for local datasets)
+            (when (and show-info? (not is-remote?))
               ($ :div.bg-blue-50.border-b.border-blue-200.px-6.py-4
                  ($ :div.space-y-4
                     ;; Description
@@ -1070,3 +1158,4 @@
                                                 "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300" (not= active-tab "comparative")})}
                      "Comparative Experiments"))))
          :else ($ :div.p-6 "Dataset not found.")))))
+

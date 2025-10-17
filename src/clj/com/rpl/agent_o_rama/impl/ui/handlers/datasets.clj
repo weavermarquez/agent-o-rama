@@ -22,6 +22,24 @@
   [examples]
   (mapv process-example-source examples))
 
+(defn- mark-remote-datasets
+  "Add :remote? flag and connection info to datasets that are remote references"
+  [datasets]
+  (mapv (fn [dataset]
+          (let [props dataset
+                module-name (:module-name props)
+                host (:cluster-conductor-host props)
+                port (:cluster-conductor-port props)]
+            ;; A dataset is remote if it has a module-name field
+            (if module-name
+              (assoc dataset
+                     :remote? true
+                     :remote-module-name module-name
+                     :remote-host host
+                     :remote-port port)
+              dataset)))
+        datasets))
+
 (defmethod com.rpl.agent-o-rama.impl.ui.sente/-event-msg-handler :datasets/get-all
   [{:keys [manager pagination filters]} uid]
   (let [underlying-objects (aor-types/underlying-objects manager)
@@ -33,8 +51,10 @@
              (mapv (fn [[id name]] {:dataset-id id, :name name}))
              (hash-map :datasets)))
       ;; Otherwise, use the existing page query
-      (let [datasets-page-query (:datasets-page-query underlying-objects)]
-        (foreign-invoke-query datasets-page-query 1000 pagination)))))
+      (let [datasets-page-query (:datasets-page-query underlying-objects)
+            result (foreign-invoke-query datasets-page-query 1000 pagination)]
+        ;; Process datasets to add remote flags
+        (update result :datasets mark-remote-datasets)))))
 
 (defmethod com.rpl.agent-o-rama.impl.ui.sente/-event-msg-handler :datasets/get-props
   [{:keys [manager dataset-id]} uid]
@@ -48,6 +68,17 @@
                                          :input-json-schema (when-not (str/blank? input-schema) input-schema)
                                          :output-json-schema (when-not (str/blank? output-schema) output-schema)})]
     {:status :ok :dataset-id dataset-id}))
+
+(defmethod com.rpl.agent-o-rama.impl.ui.sente/-event-msg-handler :datasets/add-remote
+  [{:keys [manager local-name remote-dataset-id cluster-conductor-host cluster-conductor-port module-name]} uid]
+  ;; Call the internal method to add the remote dataset
+  (aor-types/add-remote-dataset-internal
+   manager
+   (java.util.UUID/fromString remote-dataset-id)
+   (when-not (str/blank? cluster-conductor-host) cluster-conductor-host)
+   (when cluster-conductor-port (long cluster-conductor-port))
+   module-name)
+  {:status :ok :dataset-id remote-dataset-id})
 
 (defmethod com.rpl.agent-o-rama.impl.ui.sente/-event-msg-handler :datasets/set-name
   [{:keys [manager dataset-id name]} uid]
