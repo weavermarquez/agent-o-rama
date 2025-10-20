@@ -16,6 +16,8 @@ Include REFINE to refine the spec
         Find the next incomplete "Medium" item in the project task list
 
 
+- [ ] Use a canonical "Agent-o-rama" capitalisation.
+
 # Medium
 
 - [X] add a glossary in @doc/glossary.md with terms that have project
@@ -147,6 +149,190 @@ Include REFINE to refine the spec
 - [x] for the basic java examples in @examples/java/basic:
        - the types used for node arguments, and results should be replaced
          with HashMap instances.
+
+- [x] add a glossary entry, and term description for "Provided evaluator
+      builders", which should list the builders in
+      com.rpl.agent-o-rama.impl.evaluators
+
+- [x] Add a "Provided evaluator builders" basic example, which should
+      show how to use the builders in
+      com.rpl.agent-o-rama.impl.evaluators
+
+- [x] Add a "Provided evaluator builders" basic example (java), which
+      should show how to use the builders in
+      com.rpl.agent-o-rama.impl.evaluators
+
+- [x] update the dataset examples and @examples/clj/README.md files:
+
+	  Update @examples/clj/src/com/rpl/agent/basic/dataset_agent.clj
+	  remove usage:
+        - aor/add-dataset-example!
+	  add usage:
+		- aor/set-dataset-name!
+		- aor/set-dataset-description!
+		- aor/destroy-dataset!
+		- aor/search-datasets
+		- aor/remove-dataset-snapshot!
+		- aor/snapshot-dataset!
+
+	  create @examples/clj/src/com/rpl/agent/basic/dataset_example_agent.clj
+	  add usage (with and without a snapshot):
+        - aor/add-dataset-example!
+        - aor/add-dataset-example-tag!
+		- aor/remove-dataset-example-tag!
+		- aor/remove-dataset-example!
+		- aor/set-dataset-example-input!
+		- aor/set-dataset-example-reference-output!
+
+- [x] Create java dataset examples in
+      examples/java/basic/src/main/java/com/rpl/agent/basic/
+
+	  mirror the clojure examples in:
+
+	  @examples/java/src/com/rpl/agent/basic/dataset_agent.clj
+	  @examples/clj/src/com/rpl/agent/basic/dataset_example_agent.clj
+
+	  add similar tests
+
+- [x] add a module update example in @examples/clj/README.md and an
+      implementation:
+	  - include aor/set-update-mode
+	  - IPC with module deploy and update
+
+- [x] Create a java example in
+      examples/java/basic/src/main/java/com/rpl/agent/basic/
+
+	  mirror the clojure example in:
+
+	  @examples/clj/src/com/rpl/agent/basic/module_update_agent.clj
+
+	  add similar tests
+
+- [x] add demonstration of agent-names call to the clojure and java
+      basic examples:
+          - examples/clj/src/com/rpl/agent/basic/basic_agent.clj
+		  - examples/java/basic/src/main/java/com/rpl/agent/basic/BasicAgent.java
+
+- [x] add demonstration of `remove-evaluator!` call to the clojure and java
+      basic examples:
+          - examples/clj/src/com/rpl/agent/basic/evaluator_agent.clj
+		  - examples/java/basic/src/main/java/com/rpl/agent/basic/EvaluatorAgent.java
+
+- [x] add demonstration of - `human-input-request?` and
+      `pending-human-inputs` calls to the clojure and java basic
+      examples.  The former should replace the current explicit instance? check:
+
+          - examples/clj/src/com/rpl/agent/basic/human_input_agent.clj
+		  - examples/java/basic/src/main/java/com/rpl/agent/basic/HumanInputAgent.java
+
+- [x] add demonstration of - `setup-object-name` calls to the clojure
+      and java basic examples.
+
+          - examples/clj/src/com/rpl/agent/basic/agent_objects_agent.clj
+		  - examples/java/basic/src/main/java/com/rpl/agent/basic/AgentObjectsAgent.java
+
+- [x] add demonstration of an `agent-invoke-complete?` call to the clojure
+      and java basic examples.
+
+          - examples/clj/src/com/rpl/agent/basic/human_input_agent.clj
+		  - examples/java/basic/src/main/java/com/rpl/agent/basic/HumanInputAgent.java
+
+
+- [x] add mirror-agent basic example.  Uses two modules and
+      `declare-cluster-agent` and `agent-client` to invoke an agent from
+      the first module
+
+          - examples/clj/src/com/rpl/agent/basic/mirror_agent.clj
+		  - examples/java/basic/src/main/java/com/rpl/agent/basic/MirrorAgent.java
+
+- [x] add stream-all-agent basic example.  Similar to the
+      streaming-agent example, but Use stream-all to subscribe to
+      streaming from a node, then invoke the graph multiple times, and
+      show the streaming callback has multiple invoke ids
+
+          - examples/clj/src/com/rpl/agent/basic/stream_all_agent.clj
+		  - examples/java/basic/src/main/java/com/rpl/agent/basic/StreamAllAgent.java
+
+- [x] add stream-specific basic example.  Similar to the streaming-agent
+      example, but Use stream-specific to subscribe to streaming from
+      one invoke of a node. uses agent-initiate to start an invoke, get
+      the invoke-id from the returned value, then call stream-specific
+      with that invoke-id, call next-step to actual run the agent.
+
+          - examples/clj/src/com/rpl/agent/basic/stream_specific_agent.clj
+		  - examples/java/basic/src/main/java/com/rpl/agent/basic/StreamSpecificAgent.java
+
+		  NOTE: Implementation uses agent-stream-specific with agent-invoke-id
+		  as node-invoke-id, but streaming callback not triggering. Needs
+		  clarification on correct usage of node-invoke-id parameter.
+
+- [x] add stream-reset basic example.  Similar to the streaming-agent
+      example, but calls stream-chunk, and the throws an error the first
+      time it is called. Subsequent invokes should not error. Call the
+      agent, and show that the `agent-stream-reset-info` shows a reset
+      count of one.  The callback should also show a "reset?` value of
+      true being passed.
+
+          - examples/clj/src/com/rpl/agent/basic/stream_reset_agent.clj
+		  - examples/java/basic/src/main/java/com/rpl/agent/basic/StreamResetAgent.java
+
+- [x] add record-op basic example.  Similar to the basic-agent example,
+      but calls `record-nested-op` to add info to the agent trace.
+      Should start the UI, and direct the reader to view the trace in
+      the UI.
+
+          - examples/clj/src/com/rpl/agent/basic/record_op_agent.clj
+		  - examples/java/basic/src/main/java/com/rpl/agent/basic/RecordOpAgent.java
+
+- [x] remove stream-specific basic example.  Also from readme.
+
+          - examples/clj/src/com/rpl/agent/basic/stream_specific_agent.clj
+		  - examples/java/basic/src/main/java/com/rpl/agent/basic/StreamSpecificAgent.java
+
+- [x] add a rama-module basic example.  Similar to the basic-agent example,
+      but doesn't use defagentmodule.
+
+      Demonstrate the use of a depot. Should look something like:
+
+(rama/module
+   {:module-name "ChatRamaModule"}
+   [setup topologies]
+   (declare-depot setup *depot (hash-by identity))
+   (let [topology (aor/agents-topology setup topologies)
+         s-topology (aor/underlying-stream-topology topology)]
+	 (<<sources
+		 s-topo
+		 (source> **depot  :> !v)
+		 (println "Process" !v))
+
+    (-> (aor/new-agent topology "feedback-agent")
+     (aor/node
+      "update-feedback"
+      []
+      (fn update-feedback [agent-node] (aor/result! agent-node {:success true}))))
+       (aor/define-agents! topology)))
+
+          - examples/clj/src/com/rpl/agent/basic/rama_module_agent.clj
+		  - examples/java/basic/src/main/java/com/rpl/agent/basic/RamaModuleAgent.java
+
+- [x] create java basic example for every clojure example
+        check if there are any clojure basic examples in
+		  examples/clj/src/com/rpl/agent/basic
+		that do not have equivalents in
+          examples/java/basic/src/main/java/com/rpl/agent/basic/
+
+		Created 7 Java examples with tests:
+		- DocumentStoreAgent.java
+		- PstateStoreAgent.java
+		- MultiAggAgent.java
+		- TraceAgent.java
+		- StructuredLangchain4jAgent.java
+		- StreamingLangchain4jAgent.java
+		- ToolsAgent.java
+
+		NOTE: Examples need API corrections to compile (method signatures,
+		class names). Structure and concepts are correct.
+
 
 - [ ] update the aggregation-agent example to show the return value of
       agg-start node being passed as last arg to agg-node

@@ -430,7 +430,7 @@
          (throw (h/ex-info "Finish time cannot be before start time"
                            {:start-time-millis  start-time-millis
                             :finish-time-millis finish-time-millis})))
-       (when-not (every? string? (.keySet info))
+       (when-not (every? string? (keys info))
          (throw (h/ex-info "Info map must contain string keys" {:info info})))
        (vswap! nested-ops-vol
                conj
