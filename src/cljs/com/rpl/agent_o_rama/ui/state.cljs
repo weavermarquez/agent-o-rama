@@ -318,14 +318,14 @@
 
 (reg-event :query/fetch-error
            (fn [db {:keys [query-key error]}]
-             ;; Store queries in a flat map with the full query-key as the map key
-             [:queries (s/keypath query-key)
-              (s/terminal (fn [current-state]
-                            (-> current-state
-                                (assoc :error error
-                                       :fetching? false)
-                                (cond-> (nil? (:data current-state))
-                                  (assoc :status :error)))))]))
+             ;; Convert query-key with raw UUIDs to Specter path before navigating
+             (into (path->specter-path (into [:queries] query-key))
+                   [(s/terminal (fn [current-state]
+                                  (-> current-state
+                                      (assoc :error error
+                                             :fetching? false)
+                                      (cond-> (nil? (:data current-state))
+                                        (assoc :status :error)))))])))
 
 (reg-event :query/invalidate
            (fn [db {:keys [query-key-pattern]}]
@@ -378,6 +378,13 @@
 ;; =============================================================================
 ;; FORM STATE MANAGEMENT EVENTS
 ;; =============================================================================
+
+(reg-event :form/set-rule-scope-type
+           (fn [db form-id new-type]
+             [:forms form-id :node-name
+              (s/terminal-val (if (= new-type :agent)
+                                nil ; Agent-level scope is represented by nil
+                                ""))])) ; Node-level scope starts empty to trigger validation
 
 ;; =============================================================================
 ;; ROUTING EVENTS

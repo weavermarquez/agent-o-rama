@@ -7,6 +7,7 @@ import {
   createEvaluator,
   deleteEvaluator,
   addExample,
+  addEvaluatorToExperiment,
 } from './helpers.js';
 
 // =============================================================================
@@ -101,8 +102,8 @@ test.describe('Evaluator Metric Name Disambiguation', () => {
 
     await expModal.getByLabel('Experiment Name').fill(experimentName);
     
-    // Select Target Type: Node
-    await expModal.locator('select').first().selectOption('node');
+    // Select Target Type: Node (radio button)
+    await expModal.getByLabel('Node').check();
     
     // Select the agent
     await expModal.getByTestId('agent-name-dropdown').click();
@@ -124,12 +125,9 @@ test.describe('Evaluator Metric Name Disambiguation', () => {
     console.log('Node experiment configured for write-section with 3 input mappings.');
 
     // Select all three evaluators
-    await expModal.getByRole('button', { name: 'Add Evaluator' }).click();
-    await page.getByText(evaluatorA.name, { exact: true }).click();
-    await expModal.getByRole('button', { name: 'Add Evaluator' }).click();
-    await page.getByText(evaluatorB.name, { exact: true }).click();
-    await expModal.getByRole('button', { name: 'Add Evaluator' }).click();
-    await page.getByText(evaluatorC.name, { exact: true }).click();
+    await addEvaluatorToExperiment(page, expModal, evaluatorA.name);
+    await addEvaluatorToExperiment(page, expModal, evaluatorB.name);
+    await addEvaluatorToExperiment(page, expModal, evaluatorC.name);
     console.log('Experiment form filled with all three evaluators.');
 
     await expModal.getByRole('button', { name: 'Run Experiment' }).click();

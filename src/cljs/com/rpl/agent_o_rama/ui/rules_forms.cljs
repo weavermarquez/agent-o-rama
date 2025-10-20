@@ -7,6 +7,7 @@
    [com.rpl.agent-o-rama.ui.sente :as sente]
    [com.rpl.agent-o-rama.ui.queries :as queries]
    [com.rpl.agent-o-rama.ui.common :as common]
+   [com.rpl.agent-o-rama.ui.selectors :as selectors]
    [clojure.string :as str]
    ["use-debounce" :refer [useDebounce]]))
 
@@ -274,11 +275,11 @@
                  "[?]")))
 
          ($ :input
-            (cond-> {:type        "text"
-                     :className   input-classes
-                     :value       (or (:value param-field) "")
+            (cond-> {:type "text"
+                     :className input-classes
+                     :value (or (:value param-field) "")
                      :placeholder (or (:default param-info) "")
-                     :onChange    #((:on-change param-field) (.. % -target -value))}
+                     :onChange #((:on-change param-field) (.. % -target -value))}
               data-id (assoc :data-id data-id)))
 
          (when show-description-below?
@@ -287,6 +288,21 @@
          (if (:error param-field)
            ($ :p.text-sm.text-red-600.mt-1 (:error param-field))
            ($ :div.mt-1.h-5))))))
+
+(defui EvaluatorParamField
+  [{:keys [form-id param-name module-id]}]
+  (let [field (forms/use-form-field form-id [:action-params param-name])]
+    ($ :div
+       ($ :label.block.text-sm.font-medium.text-gray-700.mb-1
+          "Evaluator"
+          ($ :span.text-red-500.ml-1 "*"))
+       ($ selectors/EvaluatorSelector
+          {:module-id module-id
+           :value (:value field)
+           :on-change (:on-change field)
+           :error (:error field)
+           :filter-type :regular
+           :placeholder "Search for an evaluator..."}))))
 
 (defui ActionParamsForm
   [{:keys [form-id action-builders module-id]}]
@@ -299,13 +315,20 @@
       ($ :div.p-4.bg-gray-50.rounded-md.space-y-3
          ($ :div.text-sm.font-medium.text-gray-700 "Action Parameters")
          (for [[param-name param-info] params]
-           ($ ParamField {:key param-name
-                          :form-id form-id
-                          :param-name param-name
-                          :param-info param-info
-                          :action-name action-name
-                          :module-id module-id
-                          :data-id (str "param-" param-name)}))))))
+           (if (and (= action-name "aor/eval") (= param-name "name"))
+             ;; Use the new EvaluatorParamField for the evaluator 'name' parameter
+             ($ EvaluatorParamField {:key param-name
+                                     :form-id form-id
+                                     :param-name param-name
+                                     :module-id module-id})
+             ;; Use default ParamField for all other parameters
+             ($ ParamField {:key param-name
+                            :form-id form-id
+                            :param-name param-name
+                            :param-info param-info
+                            :action-name action-name
+                            :module-id module-id
+                            :data-id (str "param-" param-name)})))))))
 
 (defui StatusFilterField
   [{:keys [form-id]}]
@@ -328,52 +351,54 @@
 
 (defui SamplingRateField
   [{:keys [form-id]}]
-  (let [sampling-rate-field (forms/use-form-field form-id :sampling-rate)]
+  (let [sampling-rate-field (forms/use-form-field form-id :sampling-rate)
+        input-classes (str "w-full p-3 border rounded-md text-sm transition-colors "
+                           (if (:error sampling-rate-field)
+                             "border-red-300 focus:ring-red-500 focus:border-red-500"
+                             "border-gray-300 focus:ring-blue-500 focus:border-blue-500"))
 
-    ($ forms/form-field
-       {:label "Sampling Rate"
-        :type :number
-        :value (:value sampling-rate-field)
-        :on-change #(let [parsed (js/parseFloat %)]
-                      ((:on-change sampling-rate-field)
-                       (if (js/isNaN parsed) nil parsed)))
-        :error (:error sampling-rate-field)
-        :required? true
-        :placeholder "1.0"})))
-
-(defui NodeSelector
-  [{:keys [module-id agent-name form-id]}]
-  (let [node-name-field (forms/use-form-field form-id :node-name)
-        {:keys [data loading? error]}
-        (queries/use-sente-query {:query-key [:graph module-id agent-name]
-                                  :sente-event [:invocations/get-graph {:module-id module-id
-                                                                        :agent-name agent-name}]})
-        nodes (when-let [graph (:graph data)]
-                (sort (keys (:node-map graph))))
-        select-classes "w-full p-3 border rounded-md text-sm transition-colors border-gray-300 focus:ring-blue-500 focus:border-blue-500"]
+        handle-change (fn [e]
+                        (let [raw-value (.. e -target -value)
+                              parsed (js/parseFloat raw-value)]
+                          (if (or (js/isNaN parsed) (str/blank? raw-value))
+                            ((:on-change sampling-rate-field) nil)
+                            ;; Clamp value between 0.0 and 1.0
+                            (let [clamped (max 0.0 (min 1.0 parsed))]
+                              ((:on-change sampling-rate-field) clamped)))))]
 
     ($ :div.space-y-1
        ($ :label.block.text-sm.font-medium.text-gray-700
-          "Node")
-       ($ :select {:className select-classes
-                   :value (or (:value node-name-field) "")
-                   :disabled loading?
-                   :onChange #(let [v (.. % -target -value)]
-                                ((:on-change node-name-field)
-                                 (if (= v "") nil v)))}
-          ($ :option {:value ""}
-             (if loading?
-               "Loading..."
-               "Agent-level (all nodes)"))
-          (when nodes
-            (for [node-name nodes]
-              ($ :option {:key node-name :value node-name}
-                 node-name))))
-       (when (:error node-name-field)
-         ($ :p.text-sm.text-red-600.mt-1 (:error node-name-field)))
-       (when error
-         ($ :p.text-sm.text-red-600.mt-1 (str "Failed to load nodes: " error)))
-       ($ :div.mt-1.h-5))))
+          "Sampling Rate"
+          ($ :span.text-red-500.ml-1 "*"))
+       ($ :input {:type "number"
+                  :className input-classes
+                  :value (or (:value sampling-rate-field) "")
+                  :min "0.0"
+                  :max "1.0"
+                  :step "0.1"
+                  :placeholder "1.0"
+                  :onChange handle-change})
+       (if (:error sampling-rate-field)
+         ($ :p.text-sm.text-red-600.mt-1 (:error sampling-rate-field))
+         ($ :div.mt-1.h-5)))))
+
+(defui RuleScopeEditor [{:keys [form-id module-id agent-name]}]
+  (let [node-name-field (forms/use-form-field form-id :node-name)
+        scope-type (if (nil? (:value node-name-field)) :agent :node)]
+    ($ :div.space-y-3
+       ($ :label.block.text-sm.font-medium.text-gray-700 "Scope")
+       ($ selectors/ScopeSelector
+          {:value scope-type
+           :on-change #(state/dispatch [:form/set-rule-scope-type form-id %])})
+       (when (= scope-type :node)
+         ($ selectors/NodeSelectorDropdown
+            {:module-id module-id
+             :agent-name agent-name
+             :value (:value node-name-field)
+             :on-change (:on-change node-name-field)
+             :error (:error node-name-field)
+             :disabled? (not agent-name)
+             :data-testid "node-name-dropdown"})))))
 
 (defui ActionSelector
   [{:keys [module-id agent-name form-id]}]
@@ -438,9 +463,9 @@
            :placeholder "my-rule"
            :data-id "rule-name"})
 
-       ($ NodeSelector {:form-id form-id
-                        :module-id module-id
-                        :agent-name agent-name})
+       ($ RuleScopeEditor {:form-id form-id
+                           :module-id module-id
+                           :agent-name agent-name})
 
        ($ StatusFilterField {:form-id form-id})
 
@@ -476,6 +501,9 @@
                             props))
 
    :validators {:rule-name [forms/required]
+                :node-name [(fn [v form-state]
+                              (when (not (nil? v))
+                                (forms/required v)))]
                 :status-filter [forms/required]
                 :sampling-rate [forms/required
                                 (fn [v]
@@ -485,6 +513,9 @@
                                   (when (or (< v 0.0) (> v 1.0))
                                     "Must be between 0.0 and 1.0"))]
                 :action-name [forms/required]
+                [:action-params "name"] [(fn [v form-state]
+                                           (when (= (:action-name form-state) "aor/eval")
+                                             (forms/required v)))]
                 :filter [(fn [filter-val]
                            (letfn [(validate-filter [f]
                                      (case (:type f)

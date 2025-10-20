@@ -5,7 +5,8 @@
    [com.rpl.agent-o-rama.impl.types :as aor-types]
    [com.rpl.agent-o-rama.impl.ui :as ui]
    [com.rpl.agent-o-rama.impl.json-serialize :as jser]
-   [clojure.walk :as walk])
+   [clojure.walk :as walk]
+   [clojure.string :as str])
   (:import
    [java.net URLEncoder URLDecoder]
    [java.util UUID]))
@@ -96,7 +97,9 @@
 
           ;; --- Parse String Identifiers into Rich Types ---
           parsed-dataset-id (when-let [did (:dataset-id thawed-data)]
-                              (if (string? did) (UUID/fromString did) did))
+                              (if (and (string? did) (not (str/blank? did)))
+                                (UUID/fromString did)
+                                did))
           parsed-experiment-id (when-let [eid (:experiment-id thawed-data)]
                                  (if (string? eid) (UUID/fromString eid) eid))
           parsed-invoke-pair (when-let [iid (:invoke-id thawed-data)]
