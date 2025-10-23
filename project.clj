@@ -78,8 +78,7 @@
                          [clj-kondo "2025.09.22"]]}
              :examples {:test-paths   ["examples/clj/test"]
                         :source-paths ["examples/clj/src"]}
-             :provided {:dependencies
-                        [[com.rpl/rama "1.2.0"]]}
+             :provided {:dependencies [[com.rpl/rama "1.2.0"]]}
              :gen      {:prep-tasks   []
                         :source-paths ["scripts"]
                         :dependencies [[comb "0.1.1"]
@@ -102,7 +101,9 @@
           :output-path  "target/doc"
           :namespaces   [com.rpl.agent-o-rama
                          com.rpl.agent-o-rama.langchain4j
+                         com.rpl.agent-o-rama.langchain4j.json
                          com.rpl.agent-o-rama.store
+                         com.rpl.agent-o-rama.throttled-logging
                          com.rpl.agent-o-rama.tools]}
   :aliases {"test-all" ["with-profile" "+examples" "test"]}
   :plugins [[lein-exec "0.3.7"]
