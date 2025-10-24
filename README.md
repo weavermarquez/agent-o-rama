@@ -16,6 +16,7 @@ Agent-o-rama is a library for building scalable and stateful AI agents in Java o
 
 TODO: add telemetry image here
 
+- [Overview](#overview)
 - [Key similarities and differences with LangGraph/LangSmith](#-key-similarities-with-langgraphlangsmith)
 - [Downloads](#downloads)
 - [Learning Agent-o-rama](#learning-agent-o-rama)
@@ -30,6 +31,7 @@ TODO: add telemetry image here
   - [Online Actions](#online-actions)
   - [Time-series Telemetry](#time-series-telemetry)
 
+## Overview
 
 LLMs are powerful but inherently unpredictable, so building applications with LLMs that are helpful and performant with minimal hallucination requires being rigorous about testing and monitoring. Agent-o-rama addresses this by making evaluation and observability a first-class part of the development process, not an afterthought.
 
