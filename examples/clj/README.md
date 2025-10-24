@@ -1,4 +1,4 @@
-# Agent-O-Rama Examples
+# Agent-o-rama Examples
 
 This directory contains example implementations of AI agents using the agent-o-rama framework.
 
