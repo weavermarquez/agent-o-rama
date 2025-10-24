@@ -90,13 +90,21 @@
   ([ipc] (start-ui ipc nil))
   ([ipc options]
    (let [options (merge {:port 1974} options)]
-     (println "Starting Agent-o-rama UI on port" (:port options))
+     (cljlogging/info "Starting Agent-o-rama UI on port" (:port options))
      (start ipc (:port options))
      (reify
       AutoCloseable
       (close [_this]
         (when-not (:no-input-before-close options)
-          (println "press enter to close the ui, default port is 1974")
+          (cljlogging/info "press enter to close the ui, default port is 1974")
           (read-line))
         (stop-ui)
         :closed)))))
+
+(defn -main
+  "Main entry point for the Agent-o-rama UI"
+  [port]
+  (let [port (Long/parseLong port)
+        cluster-manager (open-cluster-manager {"conductor.host" "localhost"})]
+    (cljlogging/info "Starting Agent-o-rama UI...")
+    (start-ui cluster-manager {:port port})))
