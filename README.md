@@ -113,7 +113,7 @@ The following are the key similarities and differences between Agent-o-rama and 
 
 ## Downloads
 
-Download Agent-o-rama releases [here](https://github.com/redplanetlabs/agent-o-rama/releases). A release is used to run the Agent-o-rama frontend. See the [deployment page](TODO) for instructions on deploying. For building agent modules, add these repositories to the Maven dependencies for your project:
+Download Agent-o-rama releases [here](https://github.com/redplanetlabs/agent-o-rama/releases). A release is used to run the Agent-o-rama frontend. See [this section](https://github.com/redplanetlabs/agent-o-rama/wiki/Quickstart#running-on-a-local-rama-cluster) for instructions on deploying. For building agent modules, add these repositories to the Maven dependencies for your project:
 
 ```
 <repositories>
@@ -140,7 +140,7 @@ The Maven target for Agent-o-rama is:
 
 ## Learning Agent-o-rama
 
-* [Quickstart](TODO)
+* [Quickstart](https://github.com/redplanetlabs/agent-o-rama/wiki/Quickstart)
 * [Full documentation](https://github.com/redplanetlabs/agent-o-rama/wiki)
 * [Javadoc](TODO)
 * [Clojuredoc](TODO)
@@ -231,7 +231,7 @@ try (InProcessCluster ipc = InProcessCluster.create();
 
 These examples also launch the Agent-o-rama UI locally at `http://localhost:1974`.
 
-See [this page](TODO) for all the details of coding agents, including having multiple nodes, getting human input as part of execution, and aggregation. For lots of examples of agents in either Java or Clojure, see the [examples](https://github.com/redplanetlabs/agent-o-rama/tree/master/examples) directory in the repository.
+See [this page](https://github.com/redplanetlabs/agent-o-rama/wiki/Programming-agents) for all the details of coding agents, including having multiple nodes, getting human input as part of execution, and aggregation. For lots of examples of agents in either Java or Clojure, see the [examples](https://github.com/redplanetlabs/agent-o-rama/tree/master/examples) directory in the repository.
 
 #### Managing modules on a real cluster
 
@@ -305,7 +305,7 @@ client.stream(invoke, "someNode", (List<String> allChunks, List<String> newChunk
    (println "Received new chunks:" new-chunks)))
 ```
 
-See [this page](TODO) for all the info on streaming.
+See [this page](https://github.com/redplanetlabs/agent-o-rama/wiki/Streaming) for all the info on streaming.
 
 
 ### Creating and managing datasets
