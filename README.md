@@ -144,8 +144,8 @@ The Maven target for Agent-o-rama is:
 
 * [Quickstart](https://github.com/redplanetlabs/agent-o-rama/wiki/Quickstart)
 * [Full documentation](https://github.com/redplanetlabs/agent-o-rama/wiki)
-* [Javadoc](TODO)
-* [Clojuredoc](TODO)
+* [Javadoc](https://redplanetlabs.com/aor/javadoc/index.html)
+* [Clojuredoc](https://redplanetlabs.com/aor/clojuredoc/index.html)
 * [Mailing list](https://groups.google.com/u/1/g/rama-user)
 * #rama channel on [Clojurians](https://clojurians.slack.com/)
 
@@ -351,15 +351,3 @@ See [this page](TODO) for the details on creating actions.
 
 TODO
 - split by metadata
-
-
-
-TODO
-  - clients are just function calls
-  - agent objects
-  - aggregation
-    - should leave this to separate page and get to the rest of the tour
-    - multi-aggs
-  - tool subagent
-    - specifying tools (param schemas, etc.)
-    - providing impls
