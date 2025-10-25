@@ -6,9 +6,6 @@ import com.rpl.agentorama.AgentNode;
 import com.rpl.agentorama.AgentTopology;
 import com.rpl.agentorama.AgentModule;
 import com.rpl.agentorama.MultiAgg;
-import com.rpl.agentorama.ops.RamaVoidFunction2;
-import com.rpl.agentorama.ops.RamaVoidFunction3;
-import com.rpl.rama.ops.RamaFunction2;
 import com.rpl.rama.test.InProcessCluster;
 import com.rpl.rama.test.LaunchConfig;
 import java.util.ArrayList;
@@ -48,11 +45,46 @@ public class MultiAggAgent {
           .aggStartNode(
               "distribute-data",
               List.of("process-numbers", "process-text"),
-              new DistributeDataFunction())
+              (AgentNode agentNode, Map<String, Object> request) -> {
+                List<Integer> numbers = (List<Integer>) request.get("numbers");
+                List<String> text = (List<String>) request.get("text");
+
+                System.out.println("Distributing data for parallel processing");
+
+                // Send numbers for mathematical analysis
+                if (numbers != null) {
+                  for (Integer num : numbers) {
+                    agentNode.emit("process-numbers", num);
+                  }
+                }
+
+                // Send text for linguistic analysis
+                if (text != null) {
+                  for (String txt : text) {
+                    agentNode.emit("process-text", txt);
+                  }
+                }
+                return request;
+              })
           // Process numbers - compute statistics
-          .node("process-numbers", "combine-results", new ProcessNumbersFunction())
+          .node("process-numbers", "combine-results", (AgentNode agentNode, Integer number) -> {
+            Map<String, Object> analysis = new HashMap<>();
+            analysis.put("value", number);
+            analysis.put("square", number * number);
+            analysis.put("even", number % 2 == 0);
+
+            agentNode.emit("combine-results", "number", analysis);
+          })
           // Process text - analyze content
-          .node("process-text", "combine-results", new ProcessTextFunction())
+          .node("process-text", "combine-results", (AgentNode agentNode, String text) -> {
+            Map<String, Object> analysis = new HashMap<>();
+            analysis.put("value", text);
+            analysis.put("length", text.length());
+            analysis.put("uppercase", text.toUpperCase());
+            analysis.put("words", text.split("\\s+").length);
+
+            agentNode.emit("combine-results", "text", analysis);
+          })
           // Combine all analysis using multi-agg with tagged inputs
           .aggNode(
               "combine-results",
@@ -70,7 +102,51 @@ public class MultiAggAgent {
                         state.text.add(analysis);
                         return state;
                       }),
-              new CombineResultsFunction());
+              (AgentNode agentNode, AggregationState aggregatedState, Object startNodeArg) -> {
+                List<Map<String, Object>> numbers = aggregatedState.numbers;
+                List<Map<String, Object>> textEntries = aggregatedState.text;
+
+                // Calculate statistics from numbers
+                int numberSum = 0;
+                int squareSum = 0;
+                int evenCount = 0;
+                for (Map<String, Object> num : numbers) {
+                  numberSum += (Integer) num.get("value");
+                  squareSum += (Integer) num.get("square");
+                  if ((Boolean) num.get("even")) {
+                    evenCount++;
+                  }
+                }
+
+                // Calculate statistics from text
+                int totalWords = 0;
+                int totalCharacters = 0;
+                for (Map<String, Object> txt : textEntries) {
+                  totalWords += (Integer) txt.get("words");
+                  totalCharacters += (Integer) txt.get("length");
+                }
+
+                System.out.printf(
+                    "Processed %d numbers and %d text entries%n", numbers.size(), textEntries.size());
+
+                // Create final result
+                Map<String, Object> result = new HashMap<>();
+                Map<String, Object> summary = new HashMap<>();
+                summary.put("numberSum", numberSum);
+                summary.put("squareSum", squareSum);
+                summary.put("evenCount", evenCount);
+                summary.put("totalWords", totalWords);
+                summary.put("totalCharacters", totalCharacters);
+
+                Map<String, Object> details = new HashMap<>();
+                details.put("numbers", numbers);
+                details.put("text", textEntries);
+
+                result.put("summary", summary);
+                result.put("details", details);
+
+                agentNode.result(result);
+              });
     }
   }
 
@@ -90,7 +166,6 @@ public class MultiAggAgent {
       int size = in.readInt();
       byte[] ser = new byte[size];
       in.readFully(ser);
-      @SuppressWarnings("unchecked")
       Map<String, Object> data = (Map<String, Object>) com.rpl.agentorama.impl.AORHelpers.thaw(ser);
       this.fromMap(data);
     }
@@ -102,124 +177,15 @@ public class MultiAggAgent {
       return map;
     }
 
-    @SuppressWarnings("unchecked")
     private void fromMap(Map<String, Object> map) {
       this.numbers = (List<Map<String, Object>>) map.get("numbers");
       this.text = (List<Map<String, Object>>) map.get("text");
     }
   }
 
-  /** Aggregation start function that distributes different types of data. */
-  public static class DistributeDataFunction
-      implements RamaFunction2<AgentNode, Map<String, Object>, Object> {
 
-    @Override
-    @SuppressWarnings("unchecked")
-    public Object invoke(AgentNode agentNode, Map<String, Object> request) {
-      List<Integer> numbers = (List<Integer>) request.get("numbers");
-      List<String> text = (List<String>) request.get("text");
 
-      System.out.println("Distributing data for parallel processing");
 
-      // Send numbers for mathematical analysis
-      if (numbers != null) {
-        for (Integer num : numbers) {
-          agentNode.emit("process-numbers", num);
-        }
-      }
-
-      // Send text for linguistic analysis
-      if (text != null) {
-        for (String txt : text) {
-          agentNode.emit("process-text", txt);
-        }
-      }
-      return request;
-    }
-  }
-
-  /** Function that processes numbers and computes statistics. */
-  public static class ProcessNumbersFunction implements RamaVoidFunction2<AgentNode, Integer> {
-
-    @Override
-    public void invoke(AgentNode agentNode, Integer number) {
-      Map<String, Object> analysis = new HashMap<>();
-      analysis.put("value", number);
-      analysis.put("square", number * number);
-      analysis.put("even", number % 2 == 0);
-
-      agentNode.emit("combine-results", "number", analysis);
-    }
-  }
-
-  /** Function that processes text and analyzes content. */
-  public static class ProcessTextFunction implements RamaVoidFunction2<AgentNode, String> {
-
-    @Override
-    public void invoke(AgentNode agentNode, String text) {
-      Map<String, Object> analysis = new HashMap<>();
-      analysis.put("value", text);
-      analysis.put("length", text.length());
-      analysis.put("uppercase", text.toUpperCase());
-      analysis.put("words", text.split("\\s+").length);
-
-      agentNode.emit("combine-results", "text", analysis);
-    }
-  }
-
-  /** Function that combines all results and calculates final metrics. */
-  public static class CombineResultsFunction
-      implements RamaVoidFunction3<AgentNode, AggregationState, Object> {
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public void invoke(AgentNode agentNode, AggregationState aggregatedState, Object startNodeArg) {
-      List<Map<String, Object>> numbers = aggregatedState.numbers;
-      List<Map<String, Object>> textEntries = aggregatedState.text;
-
-      // Calculate statistics from numbers
-      int numberSum = 0;
-      int squareSum = 0;
-      int evenCount = 0;
-      for (Map<String, Object> num : numbers) {
-        numberSum += (Integer) num.get("value");
-        squareSum += (Integer) num.get("square");
-        if ((Boolean) num.get("even")) {
-          evenCount++;
-        }
-      }
-
-      // Calculate statistics from text
-      int totalWords = 0;
-      int totalChars = 0;
-      for (Map<String, Object> txt : textEntries) {
-        totalWords += (Integer) txt.get("words");
-        totalChars += (Integer) txt.get("length");
-      }
-
-      System.out.printf(
-          "Processed %d numbers and %d text entries%n", numbers.size(), textEntries.size());
-
-      Map<String, Object> summary = new HashMap<>();
-      summary.put("numbersProcessed", numbers.size());
-      summary.put("textProcessed", textEntries.size());
-      summary.put("numberSum", numberSum);
-      summary.put("squareSum", squareSum);
-      summary.put("evenCount", evenCount);
-      summary.put("totalWords", totalWords);
-      summary.put("totalCharacters", totalChars);
-
-      Map<String, Object> details = new HashMap<>();
-      details.put("numbers", numbers);
-      details.put("text", textEntries);
-
-      Map<String, Object> result = new HashMap<>();
-      result.put("summary", summary);
-      result.put("details", details);
-
-      agentNode.result(result);
-    }
-  }
 
   public static void main(String[] args) throws Exception {
     System.out.println("Starting Multi-Agg Agent Example...");
@@ -242,11 +208,9 @@ public class MultiAggAgent {
           new ArrayList(
               List.of("Hello world", "Multi-agg is powerful", "Parallel processing rocks")));
 
-      @SuppressWarnings("unchecked")
       Map<String, Object> result = (Map<String, Object>) agent.invoke(request);
 
       System.out.println("\nResults:");
-      @SuppressWarnings("unchecked")
       Map<String, Object> summary = (Map<String, Object>) result.get("summary");
       System.out.println("  Summary:");
       System.out.println("    Numbers processed: " + summary.get("numbersProcessed"));
@@ -257,11 +221,8 @@ public class MultiAggAgent {
       System.out.println("    Total words: " + summary.get("totalWords"));
       System.out.println("    Total characters: " + summary.get("totalCharacters"));
 
-      @SuppressWarnings("unchecked")
       Map<String, Object> details = (Map<String, Object>) result.get("details");
-      @SuppressWarnings("unchecked")
       List<Map<String, Object>> numberDetails = (List<Map<String, Object>>) details.get("numbers");
-      @SuppressWarnings("unchecked")
       List<Map<String, Object>> textDetails = (List<Map<String, Object>>) details.get("text");
 
       System.out.println("\n  Sample detailed results:");

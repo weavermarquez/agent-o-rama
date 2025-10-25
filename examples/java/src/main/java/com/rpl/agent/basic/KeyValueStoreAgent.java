@@ -5,7 +5,6 @@ import com.rpl.agentorama.AgentManager;
 import com.rpl.agentorama.AgentNode;
 import com.rpl.agentorama.AgentModule;
 import com.rpl.agentorama.AgentTopology;
-import com.rpl.agentorama.ops.RamaVoidFunction2;
 import com.rpl.agentorama.store.KeyValueStore;
 import com.rpl.rama.test.InProcessCluster;
 import com.rpl.rama.test.LaunchConfig;
@@ -76,73 +75,66 @@ public class KeyValueStoreAgent {
 
       topology
           .newAgent("KeyValueStoreAgent")
-          .node("manage-counter", null, new ManageCounterFunction());
+          .node("manage-counter", null, (AgentNode agentNode, Map<String, Object> request) -> {
+            KeyValueStore<String, Long> countersStore = agentNode.getStore("$$counters");
+            String counterName = (String) request.get("counterName");
+            String operationStr = (String) request.get("operation");
+            Operation operation = Operation.valueOf(operationStr);
+            Long value = (Long) request.get("value");
+
+            Map<String, Object> result;
+
+            switch (operation) {
+              case GET:
+                Long currentValue = countersStore.get(counterName);
+                result = createCounterResponse("get", counterName);
+                result.put("value", currentValue);
+                break;
+
+              case INCREMENT:
+                Long current = countersStore.get(counterName);
+                if (current == null) current = 0L;
+                Long newValue = current + 1;
+                countersStore.put(counterName, newValue);
+                result = createCounterResponse("increment", counterName);
+                result.put("previousValue", current);
+                result.put("newValue", newValue);
+                break;
+
+              case SET:
+                countersStore.put(counterName, value);
+                result = createCounterResponse("set", counterName);
+                result.put("value", value);
+                break;
+
+              case UPDATE:
+                Long currentVal = countersStore.get(counterName);
+                if (currentVal == null) currentVal = 0L;
+                Long updatedValue = currentVal + value;
+                countersStore.update(counterName, v -> (v == null ? 0L : v) + value);
+                result = createCounterResponse("update", counterName);
+                result.put("previousValue", currentVal);
+                result.put("addedValue", value);
+                result.put("newValue", updatedValue);
+                break;
+
+              default:
+                throw new IllegalArgumentException("Unknown operation: " + operation);
+            }
+
+            System.out.printf(
+                "Counter '%s' %s: %s%n",
+                counterName,
+                operation.toString().toLowerCase(),
+                result.get("value") != null
+                    ? result.get("value")
+                    : result.get("newValue") != null ? result.get("newValue") : "completed");
+
+            agentNode.result(result);
+          });
     }
   }
 
-  /** Node function that manages counter operations using the key-value store. */
-  public static class ManageCounterFunction
-      implements RamaVoidFunction2<AgentNode, Map<String, Object>> {
-
-    @Override
-    public void invoke(AgentNode agentNode, Map<String, Object> request) {
-      KeyValueStore<String, Long> countersStore = agentNode.getStore("$$counters");
-      String counterName = (String) request.get("counterName");
-      String operationStr = (String) request.get("operation");
-      Operation operation = Operation.valueOf(operationStr);
-      Long value = (Long) request.get("value");
-
-      Map<String, Object> result;
-
-      switch (operation) {
-        case GET:
-          Long currentValue = countersStore.get(counterName);
-          result = createCounterResponse("get", counterName);
-          result.put("value", currentValue);
-          break;
-
-        case INCREMENT:
-          Long current = countersStore.get(counterName);
-          if (current == null) current = 0L;
-          Long newValue = current + 1;
-          countersStore.put(counterName, newValue);
-          result = createCounterResponse("increment", counterName);
-          result.put("previousValue", current);
-          result.put("newValue", newValue);
-          break;
-
-        case SET:
-          countersStore.put(counterName, value);
-          result = createCounterResponse("set", counterName);
-          result.put("value", value);
-          break;
-
-        case UPDATE:
-          Long currentVal = countersStore.get(counterName);
-          if (currentVal == null) currentVal = 0L;
-          Long updatedValue = currentVal + value;
-          countersStore.update(counterName, v -> (v == null ? 0L : v) + value);
-          result = createCounterResponse("update", counterName);
-          result.put("previousValue", currentVal);
-          result.put("addedValue", value);
-          result.put("newValue", updatedValue);
-          break;
-
-        default:
-          throw new IllegalArgumentException("Unknown operation: " + operation);
-      }
-
-      System.out.printf(
-          "Counter '%s' %s: %s%n",
-          counterName,
-          operation.toString().toLowerCase(),
-          result.get("value") != null
-              ? result.get("value")
-              : result.get("newValue") != null ? result.get("newValue") : "completed");
-
-      agentNode.result(result);
-    }
-  }
 
   public static void main(String[] args) throws Exception {
     System.out.println("Starting Key-Value Store Agent Example...");
@@ -161,7 +153,6 @@ public class KeyValueStoreAgent {
 
       // Demonstrate different counter operations
       System.out.println("\n--- Setting initial counter value ---");
-      @SuppressWarnings("unchecked")
       Map<String, Object> result1 =
           (Map<String, Object>)
               agent.invoke(createCounterRequest("page-views", Operation.SET, 10L));
@@ -170,7 +161,6 @@ public class KeyValueStoreAgent {
           result1.get("action"), result1.get("counter"), result1.get("value"));
 
       System.out.println("\n--- Getting current counter value ---");
-      @SuppressWarnings("unchecked")
       Map<String, Object> result2 =
           (Map<String, Object>)
               agent.invoke(createCounterRequest("page-views", Operation.GET, null));
@@ -179,7 +169,6 @@ public class KeyValueStoreAgent {
           result2.get("action"), result2.get("counter"), result2.get("value"));
 
       System.out.println("\n--- Incrementing counter ---");
-      @SuppressWarnings("unchecked")
       Map<String, Object> result3 =
           (Map<String, Object>)
               agent.invoke(createCounterRequest("page-views", Operation.INCREMENT, null));
@@ -191,7 +180,6 @@ public class KeyValueStoreAgent {
           result3.get("newValue"));
 
       System.out.println("\n--- Updating counter by adding value ---");
-      @SuppressWarnings("unchecked")
       Map<String, Object> result4 =
           (Map<String, Object>)
               agent.invoke(createCounterRequest("page-views", Operation.UPDATE, 5L));
@@ -204,7 +192,6 @@ public class KeyValueStoreAgent {
           result4.get("newValue"));
 
       System.out.println("\n--- Working with different counter ---");
-      @SuppressWarnings("unchecked")
       Map<String, Object> result5 =
           (Map<String, Object>)
               agent.invoke(createCounterRequest("api-calls", Operation.INCREMENT, null));
@@ -216,11 +203,9 @@ public class KeyValueStoreAgent {
           result5.get("newValue"));
 
       System.out.println("\n--- Final state check ---");
-      @SuppressWarnings("unchecked")
       Map<String, Object> result6 =
           (Map<String, Object>)
               agent.invoke(createCounterRequest("page-views", Operation.GET, null));
-      @SuppressWarnings("unchecked")
       Map<String, Object> result7 =
           (Map<String, Object>)
               agent.invoke(createCounterRequest("api-calls", Operation.GET, null));
