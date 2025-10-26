@@ -35,7 +35,7 @@ TODO: add telemetry image here
 
 LLMs are powerful but inherently unpredictable, so building applications with LLMs that are helpful and performant with minimal hallucination requires being rigorous about testing and monitoring. Agent-o-rama addresses this by making evaluation and observability a first-class part of the development process, not an afterthought.
 
-Agent-o-rama is deployed onto your own infrastructure on a [Rama cluster](https://redplanetlabs.com/), which is free to use. Every part of Agent-o-rama is built-in and requires no other dependency besides Rama, including high-performance, durable, and replicated storage of any data model that can be used as part of agents. Agent-o-rama also integrates seamlessly with any other tool, such as databases, vector stores, external APIs, or anything else.
+Agent-o-rama is deployed onto your own infrastructure on a [Rama cluster](https://redplanetlabs.com/). Rama is free to use for clusters of up to two nodes and can scale to thousands with a commercial license. Every part of Agent-o-rama is built-in and requires no other dependency besides Rama, including high-performance, durable, and replicated storage of any data model that can be used as part of agents. Agent-o-rama also integrates seamlessly with any other tool, such as databases, vector stores, external APIs, or anything else.
 
 Agent-o-rama integrates with [Langchain4j](https://docs.langchain4j.dev/) to capture detailed traces of model calls and embedding-store operations, and to stream model interactions to clients in real time. Integration is fully optional – if you prefer to use other APIs for model access, Agent-o-rama supports that as well.
 
@@ -161,7 +161,7 @@ Agents are defined in "modules" which also contain storage definitions, agent ob
 #### Java example
 
 ```java
-public BasicAgentModule extends AgentModule {
+public class BasicAgentModule extends AgentModule {
   @Override
   protected void defineAgents(AgentTopology topology) {
     topology.declareAgentObject("openai-api-key", System.getenv("OPENAI_API_KEY"));
