@@ -2,24 +2,14 @@ package com.rpl.agent.research;
 
 import com.rpl.agentorama.*;
 import dev.langchain4j.data.document.Document;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.model.chat.request.ResponseFormat;
-import dev.langchain4j.model.chat.request.ResponseFormatType;
-import dev.langchain4j.model.chat.request.json.JsonSchema;
-import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
-import dev.langchain4j.model.chat.request.json.JsonArraySchema;
-import dev.langchain4j.model.openai.OpenAiChatModel;
-import dev.langchain4j.model.openai.OpenAiStreamingChatModel;
+import dev.langchain4j.model.chat.request.*;
+import dev.langchain4j.model.chat.request.json.*;
+import dev.langchain4j.model.openai.*;
 import dev.langchain4j.web.search.WebSearchRequest;
 import dev.langchain4j.web.search.tavily.TavilyWebSearchEngine;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.net.http.*;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -27,11 +17,9 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.*;
 
 public class ResearchAgentModule extends AgentModule {
-
   private static final String ANALYST_INSTRUCTIONS =
     "You are tasked with creating a set of AI analyst personas. Follow these instructions carefully:\n\n" +
     "1. First, review the research topic: %s\n\n" +
@@ -175,34 +163,29 @@ public class ResearchAgentModule extends AgentModule {
       .build())
     .build();
 
-
   @Override
   protected void defineAgents(AgentTopology topology) {
     topology.declareAgentObject("openai-api-key", System.getenv("OPENAI_API_KEY"));
     topology.declareAgentObject("tavily-api-key", System.getenv("TAVILY_API_KEY"));
-
     topology.declareAgentObjectBuilder("openai", setup ->
       OpenAiStreamingChatModel.builder()
-        .apiKey((String) setup.getAgentObject("openai-api-key"))
+        .apiKey(setup.getAgentObject("openai-api-key"))
         .modelName("gpt-4o-mini")
         .build()
     );
-
     topology.declareAgentObjectBuilder("openai-non-streaming", setup ->
       OpenAiChatModel.builder()
-        .apiKey((String) setup.getAgentObject("openai-api-key"))
+        .apiKey(setup.getAgentObject("openai-api-key"))
         .modelName("gpt-4o-mini")
         .build()
     );
-
     topology.declareAgentObjectBuilder("tavily", setup ->
       TavilyWebSearchEngine.builder()
-        .apiKey((String) setup.getAgentObject("tavily-api-key"))
+        .apiKey(setup.getAgentObject("tavily-api-key"))
         .excludeDomains(Arrays.asList("en.wikipedia.org"))
         .timeout(Duration.ofMinutes(1))
         .build()
     );
-
     topology.newAgent("researcher")
       .node("create-analysts", "feedback", (AgentNode agentNode, String humanFeedback, Map<String, Object> options) -> {
         Map<String, Object> config = new HashMap<>();
@@ -212,27 +195,20 @@ public class ResearchAgentModule extends AgentModule {
 
         String topic = (String) config.get("topic");
         Integer maxAnalysts = (Integer) config.get("max-analysts");
-
-        ChatModel openai = (ChatModel) agentNode.getAgentObject("openai-non-streaming");
-
+        ChatModel openai = agentNode.getAgentObject("openai-non-streaming");
         String instructions = String.format(ANALYST_INSTRUCTIONS, topic, humanFeedback, maxAnalysts);
-
         List<ChatMessage> messages = Arrays.asList(new SystemMessage(instructions));
-
         ResponseFormat responseFormat = ResponseFormat.builder()
           .type(ResponseFormatType.JSON)
           .jsonSchema(ANALYST_RESPONSE_SCHEMA)
           .build();
-
         ChatRequest chatRequest = ChatRequest.builder()
           .messages(messages)
           .responseFormat(responseFormat)
           .build();
 
         String response = openai.chat(chatRequest).aiMessage().text();
-
         List<Map<String, Object>> analysts = parseAnalystsResponse(response);
-
         agentNode.emit("feedback", analysts, config);
       })
       .node("feedback", Arrays.asList("create-analysts", "questions"), (AgentNode agentNode, List<Map<String, Object>> analysts, Map<String, Object> options) -> {
@@ -257,7 +233,7 @@ public class ResearchAgentModule extends AgentModule {
         return config;
       })
       .aggStartNode("generate-question", Arrays.asList("search-web", "search-wikipedia"), (AgentNode agentNode, String persona, List<ChatMessage> messages, Integer maxTurns) -> {
-        ChatModel openai = (ChatModel) agentNode.getAgentObject("openai");
+        ChatModel openai = agentNode.getAgentObject("openai");
         String instructions = String.format(GENERATE_QUESTION_INSTRUCTIONS, persona);
 
         List<ChatMessage> chatMessages = new ArrayList<>();
@@ -280,9 +256,8 @@ public class ResearchAgentModule extends AgentModule {
         return result;
       })
       .node("search-web", "agg-research", (AgentNode agentNode, String searchQuery) -> {
-        TavilyWebSearchEngine tavily = (TavilyWebSearchEngine) agentNode.getAgentObject("tavily");
+        TavilyWebSearchEngine tavily = agentNode.getAgentObject("tavily");
         List<Document> docs = tavily.search(WebSearchRequest.from(searchQuery, 3)).toDocuments();
-
         for (Document doc : docs) {
           String url = doc.metadata().getString("url");
           String content = doc.text();
@@ -305,7 +280,7 @@ public class ResearchAgentModule extends AgentModule {
         }
       })
       .aggNode("agg-research", Arrays.asList("generate-question", "write-section"), BuiltIn.LIST_AGG, (AgentNode agentNode, List<String> searches, Map<String, Object> context) -> {
-        ChatModel openai = (ChatModel) agentNode.getAgentObject("openai");
+        ChatModel openai = agentNode.getAgentObject("openai");
         String persona = (String) context.get("persona");
         List<ChatMessage> messages = (List<ChatMessage>) context.get("messages");
         Integer maxTurns = (Integer) context.get("max-turns");
@@ -334,7 +309,7 @@ public class ResearchAgentModule extends AgentModule {
         }
       })
       .node("write-section", "agg-sections", (AgentNode agentNode, String persona, List<ChatMessage> messages, String context) -> {
-        ChatModel openai = (ChatModel) agentNode.getAgentObject("openai");
+        ChatModel openai = agentNode.getAgentObject("openai");
         String interview = extractInterview(messages);
         String instructions = String.format(SECTION_WRITER_INSTRUCTIONS, persona);
 
@@ -359,7 +334,7 @@ public class ResearchAgentModule extends AgentModule {
         return null;
       })
       .node("write-report", "finish-report", (AgentNode agentNode, String sections, String topic) -> {
-        ChatModel openai = (ChatModel) agentNode.getAgentObject("openai");
+        ChatModel openai = agentNode.getAgentObject("openai");
         String instructions = String.format(REPORT_WRITER_INSTRUCTIONS, topic, sections);
 
         List<ChatMessage> chatMessages = Arrays.asList(
@@ -371,26 +346,20 @@ public class ResearchAgentModule extends AgentModule {
         agentNode.emit("finish-report", "report", report);
       })
       .node("write-intro", "finish-report", (AgentNode agentNode, String sections, String topic) -> {
-        ChatModel openai = (ChatModel) agentNode.getAgentObject("openai");
+        ChatModel openai = agentNode.getAgentObject("openai");
         String instructions = String.format(INTRO_CONCLUSION_INSTRUCTIONS, topic, sections);
-
         List<ChatMessage> chatMessages = Arrays.asList(
           new SystemMessage(instructions),
-          new UserMessage("Write the report introduction")
-        );
-
+          new UserMessage("Write the report introduction"));
         String intro = openai.chat(chatMessages).aiMessage().text();
         agentNode.emit("finish-report", "intro", intro);
       })
       .node("write-conclusion", "finish-report", (AgentNode agentNode, String sections, String topic) -> {
-        ChatModel openai = (ChatModel) agentNode.getAgentObject("openai");
+        ChatModel openai = agentNode.getAgentObject("openai");
         String instructions = String.format(INTRO_CONCLUSION_INSTRUCTIONS, topic, sections);
-
         List<ChatMessage> chatMessages = Arrays.asList(
           new SystemMessage(instructions),
-          new UserMessage("Write the report conclusion")
-        );
-
+          new UserMessage("Write the report conclusion"));
         String conclusion = openai.chat(chatMessages).aiMessage().text();
         agentNode.emit("finish-report", "conclusion", conclusion);
       })
@@ -417,7 +386,6 @@ public class ResearchAgentModule extends AgentModule {
         }
 
         String finalReport = finalReportBuilder.toString();
-
         agentNode.result(finalReport);
       });
   }
@@ -426,18 +394,15 @@ public class ResearchAgentModule extends AgentModule {
     try {
       JsonNode root = objectMapper.readTree(response);
       JsonNode analystsArray = root.path("analysts");
-
       if (!analystsArray.isArray()) {
         throw new RuntimeException("Invalid JSON schema: 'analysts' field must be an array");
       }
-
       List<Map<String, Object>> analysts = new ArrayList<>();
       for (JsonNode analystNode : analystsArray) {
         if (!analystNode.has("name") || !analystNode.has("role") ||
             !analystNode.has("affiliation") || !analystNode.has("description")) {
           throw new RuntimeException("Invalid JSON schema: analyst missing required fields (name, role, affiliation, description)");
         }
-
         Map<String, Object> analyst = new HashMap<>();
         analyst.put("name", analystNode.path("name").asText());
         analyst.put("role", analystNode.path("role").asText());
@@ -449,7 +414,6 @@ public class ResearchAgentModule extends AgentModule {
       if (analysts.isEmpty()) {
         throw new RuntimeException("No valid analysts found in response");
       }
-
       return analysts;
     } catch (Exception e) {
       throw new RuntimeException("Failed to parse analysts response: " + e.getMessage(), e);
@@ -461,7 +425,6 @@ public class ResearchAgentModule extends AgentModule {
     String role = analyst.get("role") != null ? analyst.get("role").toString() : "Unknown";
     String affiliation = analyst.get("affiliation") != null ? analyst.get("affiliation").toString() : "Unknown";
     String description = analyst.get("description") != null ? analyst.get("description").toString() : "No description available";
-
     return String.format("Name: %s\nRole: %s\nAffiliation: %s\nDescription: %s",
       name, role, affiliation, description);
   }
@@ -484,7 +447,6 @@ public class ResearchAgentModule extends AgentModule {
     List<ChatMessage> chatMessages = new ArrayList<>();
     chatMessages.add(new SystemMessage(SEARCH_INSTRUCTIONS));
     chatMessages.addAll(messages);
-
     int iters = 0;
     while (iters < 3) {
       String query = openai.chat(chatMessages).aiMessage().text();
@@ -492,7 +454,6 @@ public class ResearchAgentModule extends AgentModule {
       chatMessages.add(new UserMessage(String.format("You last generated: %s\nTry again and keep the query under 400 chars.", query)));
       iters++;
     }
-
     throw new RuntimeException("Failed to generate search query <= 400 chars");
   }
 
@@ -514,18 +475,15 @@ public class ResearchAgentModule extends AgentModule {
   private static List<Map<String, Object>> wikipediaLoader(String query, int maxDocs) throws IOException, InterruptedException {
     List<String> titles = wikiSearch(query);
     List<Map<String, Object>> docs = new ArrayList<>();
-
     if (titles == null || titles.isEmpty()) {
       return docs;
     }
-
     int docCount = Math.min(titles.size(), maxDocs);
     for (int i = 0; i < docCount; i++) {
       String title = titles.get(i);
       Map<String, Object> doc = wikiExtract(title);
       docs.add(doc);
     }
-
     return docs;
   }
 
@@ -567,21 +525,17 @@ public class ResearchAgentModule extends AgentModule {
     String url = "https://en.wikipedia.org/w/api.php" +
       "?action=query&prop=extracts&explaintext=true&format=json&titles=" +
       URLEncoder.encode(title, StandardCharsets.UTF_8);
-
     HttpRequest request = HttpRequest.newBuilder()
       .uri(java.net.URI.create(url))
       .header("User-Agent", "Agent-o-rama/1.0 (Research Agent)")
       .header("Accept", "application/json")
       .GET()
       .build();
-
     HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
     if (response.statusCode() == 200) {
       JsonNode root = objectMapper.readTree(response.body());
       JsonNode queryNode = root.path("query");
       JsonNode pages = queryNode.path("pages");
-
       Map<String, Object> doc = new HashMap<>();
       if (pages.isObject() && pages.size() > 0) {
         JsonNode firstPage = pages.iterator().next();
