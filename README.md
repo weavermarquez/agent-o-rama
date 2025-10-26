@@ -156,7 +156,7 @@ Below is a quick tour of all aspects of Agent-o-rama, starting with defining age
 
 ### Defining and deploying agents
 
-Agents are defined in "modules" which also contain storage definitions, agent objects (such as LLM or database clients), custom [evaluators](TODO), and custom [actions](TODO). A module can have any number of agents in it, and a module is launched on a cluster with one-line commands with the Rama CLI. For example, here's how to define a module `BasicAgentModule` with one agent that does a single LLM call and run it in the "in-process cluster" (IPC) development environment in both Java and Clojure:
+Agents are defined in "modules" which also contain storage definitions, agent objects (such as LLM or database clients), custom [evaluators](Datasets,-evaluators,-and-experiments), and custom [actions](Actions,-rules,-and-telemetry). A module can have any number of agents in it, and a module is launched on a cluster with one-line commands with the Rama CLI. For example, here's how to define a module `BasicAgentModule` with one agent that does a single LLM call and run it in the "in-process cluster" (IPC) development environment in both Java and Clojure:
 
 #### Java example
 
@@ -312,7 +312,7 @@ See [this page](https://github.com/redplanetlabs/agent-o-rama/wiki/Streaming) fo
 
 ### Creating and managing datasets
 
-Datasets of examples can be created and managed via the UI or API. Examples can be added manually, imported in bulk via [JSONL](https://jsonlines.org/examples/) files, or added automatically from production runs with [actions](TODO). See all the info about datasets [on this page](TODO).
+Datasets of examples can be created and managed via the UI or API. Examples can be added manually, imported in bulk via [JSONL](https://jsonlines.org/examples/) files, or added automatically from production runs with [actions](Actions,-rules,-and-telemetry). See all the info about datasets [on this page](Datasets,-evaluators,-and-experiments).
 
 ![Dataset](readme/dataset.png)
 
@@ -330,7 +330,7 @@ Experiments use "evaluators" to score performance. Evaluators are functions that
 
 ![Create LLM judge](readme/create-llm-judge.png)
 
-See all the info about experiments [on this page](TODO).
+See all the info about experiments [on this page](Datasets,-evaluators,-and-experiments).
 
 ### Online actions
 
@@ -344,7 +344,7 @@ Here's an example of creating an action to add slow runs to a dataset:
 
 ![Add to dataset](readme/action-eval.png)
 
-See [this page](TODO) for the details on creating actions.
+See [this page](Actions,-rules,-and-telemetry) for the details on creating actions.
 
 
 ### Time-series telemetry
