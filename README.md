@@ -1,7 +1,6 @@
 # Agent-o-rama
 
-Agent-o-rama is a library for building scalable and stateful AI agents in Java or Clojure. Agents are defined as simple graphs of pure Java or Clojure functions, and Agent-o-rama automatically captures detailed traces and provides facilities and a web UI for offline experimentation, online evaluation, time-series telemetry (e.g. latencies, token usage), and much more. Agent-o-rama is heavily inspired by [LangGraph](https://www.langchain.com/langgraph) and [LangSmith](https://www.langchain.com/langsmith/observability).
-
+Agent-o-rama is a library for building scalable and stateful AI agents in Java or Clojure. Agents are defined as simple graphs of Java or Clojure functions that execute in parallel, with built-in high-performance storage for any data model and integrated deployment. Agent-o-rama automatically captures detailed traces and includes a web UI for offline experimentation, online evaluation, and time-series telemetry (e.g. latencies, token usage). Inspired by [LangGraph](https://www.langchain.com/langgraph) and [LangSmith](https://www.langchain.com/langsmith/observability), Agent-o-rama extends those ideas with far greater scalability, full parallel execution, and built-in data storage and deployment.
 
 <p align="center">
   <img src="readme/trace.png" width="30%" alt="Agent execution trace">
@@ -98,7 +97,7 @@ The following are the key similarities and differences between Agent-o-rama and 
   All agent code executes on [virtual threads](https://docs.oracle.com/en/java/javase/21/core/virtual-threads.html), which lets all code be written in a blocking style without consuming scarce platform threads. Coding long-running or I/O-intensive tasks is straightforward since the complexity of callbacks or async frameworks is avoided.
 
 - **Feature parity:**  
-  Agent-o-rama doesn't have every feature of Langsmith yet, such as annotation queues and "few-shot examples". However, we're working on those.
+  Agent-o-rama doesn't have every feature of LangSmith yet, such as annotation queues and "few-shot examples". However, we're working on those.
 
 #### 🧠 State & Control
 
