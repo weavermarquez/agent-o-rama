@@ -155,7 +155,7 @@ Below is a quick tour of all aspects of Agent-o-rama, starting with defining age
 
 ### Defining and deploying agents
 
-Agents are defined in "modules" which also contain storage definitions, agent objects (such as LLM or database clients), custom [evaluators](Datasets,-evaluators,-and-experiments), and custom [actions](Actions,-rules,-and-telemetry). A module can have any number of agents in it, and a module is launched on a cluster with one-line commands with the Rama CLI. For example, here's how to define a module `BasicAgentModule` with one agent that does a single LLM call and run it in the "in-process cluster" (IPC) development environment in both Java and Clojure:
+Agents are defined in "modules" which also contain storage definitions, agent objects (such as LLM or database clients), custom [evaluators](https://github.com/redplanetlabs/agent-o-rama/wiki/Datasets,-evaluators,-and-experiments), and custom [actions](https://github.com/redplanetlabs/agent-o-rama/wiki/Actions,-rules,-and-telemetry). A module can have any number of agents in it, and a module is launched on a cluster with one-line commands with the Rama CLI. For example, here's how to define a module `BasicAgentModule` with one agent that does a single LLM call and run it in the "in-process cluster" (IPC) development environment in both Java and Clojure:
 
 #### Java example
 
@@ -184,7 +184,7 @@ public class BasicAgentModule extends AgentModule {
 }
 
 try (InProcessCluster ipc = InProcessCluster.create();
-     Object ui = UI.start(ipc)) {
+     AutoCloseable ui = UI.start(ipc)) {
   BasicAgentModule module = new BasicAgentModule();
   ipc.launchModule(module, new LaunchConfig(1, 1));
   String moduleName = module.getModuleName();
@@ -311,7 +311,7 @@ See [this page](https://github.com/redplanetlabs/agent-o-rama/wiki/Streaming) fo
 
 ### Creating and managing datasets
 
-Datasets of examples can be created and managed via the UI or API. Examples can be added manually, imported in bulk via [JSONL](https://jsonlines.org/examples/) files, or added automatically from production runs with [actions](Actions,-rules,-and-telemetry). See all the info about datasets [on this page](Datasets,-evaluators,-and-experiments).
+Datasets of examples can be created and managed via the UI or API. Examples can be added manually, imported in bulk via [JSONL](https://jsonlines.org/examples/) files, or added automatically from production runs with [actions](https://github.com/redplanetlabs/agent-o-rama/wiki/Actions,-rules,-and-telemetry). See all the info about datasets [on this page](https://github.com/redplanetlabs/agent-o-rama/wiki/Datasets,-evaluators,-and-experiments).
 
 ![Dataset](readme/dataset.png)
 
@@ -329,13 +329,13 @@ Experiments use "evaluators" to score performance. Evaluators are functions that
 
 ![Create LLM judge](readme/create-llm-judge.png)
 
-See all the info about experiments [on this page](Datasets,-evaluators,-and-experiments).
+See all the info about experiments [on this page](https://github.com/redplanetlabs/agent-o-rama/wiki/Datasets,-evaluators,-and-experiments).
 
 ### Online actions
 
 Actions can be set up via the UI to run automatically on the results of production runs. Actions can do online evaluation, add to datasets, trigger webhooks, or run any custom function. Actions receive as input the run input/output, run statistics (e.g. latency, token counts), and any errors during the run. Actions can set a sampling rate or filter for runs matching particular parameters.
 
-Online evaluation gets added as feedback on the run that is viewable in traces, and time-series charts are automatically created that are viewable in the [analytics section](#time-series-telemetry). Here's an example of setting up an action to do online evaluation:
+Online evaluation gets added as feedback on the run that is viewable in traces, and time-series charts are automatically created that are viewable in the [analytics section](https://github.com/redplanetlabs/agent-o-rama/wiki/Actions,-rules,-and-telemetry#time-series-telemetry). Here's an example of setting up an action to do online evaluation:
 
 ![Online evaluation](readme/action-eval.png)
 
@@ -343,7 +343,7 @@ Here's an example of creating an action to add slow runs to a dataset:
 
 ![Add to dataset](readme/action-eval.png)
 
-See [this page](Actions,-rules,-and-telemetry) for the details on creating actions.
+See [this page](https://github.com/redplanetlabs/agent-o-rama/wiki/Actions,-rules,-and-telemetry) for the details on creating actions.
 
 
 ### Time-series telemetry
