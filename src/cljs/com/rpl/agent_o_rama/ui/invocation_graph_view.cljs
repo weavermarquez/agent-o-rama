@@ -19,11 +19,6 @@
    ["@dagrejs/dagre" :as Dagre]
    ["@heroicons/react/24/outline" :refer [ExclamationTriangleIcon ArrowPathIcon ArrowTopRightOnSquareIcon PencilIcon XMarkIcon]]))
 
-(defui ExpandableContentModal [{:keys [title content]}]
-  ($ :div.p-6.space-y-4
-     ($ :pre.text-xs.bg-gray-50.p-3.rounded.border.overflow-auto.max-h-80.font-mono
-        content)))
-
 (defui ExceptionDetailModal [{:keys [title content]}]
   ($ :div.p-6.space-y-4
      ($ :pre.text-xs.bg-gray-50.p-3.rounded.border.overflow-auto.max-h-80.font-mono
@@ -130,7 +125,7 @@
                             (.stopPropagation e)
                             (state/dispatch [:modal/show :expandable-content
                                              {:title title
-                                              :component ($ ExpandableContentModal {:title title :content pretty-str})}]))
+                                              :component ($ common/ContentDetailModal {:title title :content pretty-str})}]))
                  :title "Click to expand"}
           truncated-str))))
 
@@ -240,19 +235,22 @@
 
 (defn transform-node-data-for-dataset
   "Transform node data from app-db to simplified format for dataset.
-   Returns {\"node\" node-name, \"args\" [...]} with string keys.
-   If there's a result, grab the value inside of it.
-   If there's no result, grab the emits."
+   Returns the result value, or an array of emit instructions.
+   If there's a result, return its value.
+   If there are emits, return array of {\"node\" node-name, \"args\" args-vec} instructions."
   [raw-node-data node-name]
   (let [result (:result raw-node-data)
         emits (:emits raw-node-data)]
     (cond
       ;; If there's a result, use its value
-      result {"node" node-name "args" [(:val result)]}
-      ;; If there are emits, use the actual emitted values directly
-      (seq emits) {"node" node-name "args" (mapv #(first (:args %)) emits)}
+      result (:val result)
+      ;; If there are emits, return array of emit instructions with full args vectors
+      (seq emits) (mapv (fn [emit]
+                          {"node" (:node-name emit)
+                           "args" (:args emit)})
+                        emits)
       ;; Default case if no result or emits
-      :else {"node" node-name "args" []})))
+      :else [])))
 
 (defn transform-node-input-for-dataset
   "Transform node input data from app-db to simplified format for dataset.
@@ -261,12 +259,6 @@
   [raw-node-data node-name]
   (let [input (:input raw-node-data)]
     {"node" node-name "args" (if (vector? input) input [input])}))
-
-(defn transform-agent-data-for-dataset
-  "Transform agent data from app-db to simplified format for dataset.
-   Returns {\"node\" 'agent', \"args\" [...]} with string keys."
-  [invoke-args result-val]
-  {"node" "agent" "args" [result-val]})
 
 (defui hitl-request-panel [{:keys [hr hr-invoke-id hitl-response submitting? module-id agent-name invoke-id]}]
   (when hr
