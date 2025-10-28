@@ -865,21 +865,22 @@
   (when result
     (let [failure? (:failure? result)
           result-val (:val result)]
-      ($ :div {:className "bg-gray-50 p-3 rounded-lg border border-gray-200"
+      ($ :div {:className "bg-gray-50 p-3 rounded-lg border border-gray-200 min-w-0"
                :data-id "final-result-section"}
          ($ :div {:className "flex justify-between items-center mb-2"}
             ($ :div {:className "text-sm font-medium text-gray-700"} "Final Result")
             (if failure?
               ($ :span {:className "px-2 py-1 bg-red-100 text-red-800 rounded-full text-xs font-medium"} "Failed")
               ($ :span {:className "px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium"} "Success")))
-         ($ common/ExpandableContent {:content result-val
-                                      :color (if failure? "red" "green")
-                                      :modal-title "Final Result Details"
-                                      :truncate-length 200
-                                      :on-expand (fn [{:keys [title content]}]
-                                                   (state/dispatch [:modal/show :content-detail
-                                                                    {:title title
-                                                                     :component ($ common/ContentDetailModal {:title title :content content})}]))})
+         ($ :div {:className "min-w-0"}
+            ($ common/ExpandableContent {:content result-val
+                                         :color (if failure? "red" "green")
+                                         :modal-title "Final Result Details"
+                                         :truncate-length 200
+                                         :on-expand (fn [{:keys [title content]}]
+                                                      (state/dispatch [:modal/show :content-detail
+                                                                       {:title title
+                                                                        :component ($ common/ContentDetailModal {:title title :content content})}]))}))
          ($ :div {:className "mt-4"}
             ($ :button
                {:className "w-full text-sm font-medium py-2 px-4 rounded-md transition-colors bg-green-100 text-green-800 hover:bg-green-200"

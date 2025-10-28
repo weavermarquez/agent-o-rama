@@ -52,7 +52,7 @@
   (def ipc (open-cluster-manager-internal {"conductor.host" "localhost"}))
   (def ipc (rtest/create-ipc))
   (launch-for-playwright ipc)
-
+  
   (aor/stop-ui)
 
   (start-repl ipc)
