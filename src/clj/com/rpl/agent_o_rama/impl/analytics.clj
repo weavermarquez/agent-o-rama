@@ -937,7 +937,8 @@
 
 (deframaop compute-metrics!
   [*agent->rule->info]
-  (ops/explode-map *agent->rule->info :> *agent-name *rule->info)
+  (ops/explode (po/agent-names-set) :> *agent-name)
+  (get *agent->rule->info *agent-name :> *rule->info)
   (get-all-metrics *rule->info :> *maps)
   (ops/range> 0 (get-num-tasks) :> *task-id)
   (<<ramafn %update-dep-end-offset
