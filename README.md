@@ -12,8 +12,11 @@ Agent-o-rama is a library for building scalable and stateful AI agents on the JV
   <img src="readme/fork.png" width="30%" alt="Forking">
   <img src="readme/create-llm-judge.png" width="30%" alt="Create LLM judge evaluator">
 </p>
-
-TODO: add telemetry image here
+<p align="center">
+  <img src="readme/telemetry1.png" width="30%" alt="Telemetry 1">
+  <img src="readme/telemetry2.png" width="30%" alt="Telemetry 2">
+  <img src="readme/telemetry3.png" width="30%" alt="Telemetry 3">
+</p>
 
 - [Overview](#overview)
 - [Key similarities and differences with LangGraph/LangSmith](#-key-similarities-with-langgraphlangsmith)
@@ -34,7 +37,7 @@ TODO: add telemetry image here
 
 LLMs are powerful but inherently unpredictable, so building applications with LLMs that are helpful and performant with minimal hallucination requires being rigorous about testing and monitoring. Agent-o-rama addresses this by making evaluation and observability a first-class part of the development process, not an afterthought.
 
-Agent-o-rama is deployed onto your own infrastructure on a [Rama cluster](https://redplanetlabs.com/). Rama is free to use for clusters up to two nodes and can scale to thousands with a commercial license. Every part of Agent-o-rama is built-in and requires no other dependency besides Rama, including high-performance, durable, and replicated storage of any data model that can be used as part of agents. Agent-o-rama also integrates seamlessly with any other tool, such as databases, vector stores, external APIs, or anything else.
+Agent-o-rama is deployed onto your own infrastructure on a [Rama cluster](https://redplanetlabs.com/). Rama is free to use for clusters up to two nodes and can scale to thousands with a commercial license. Every part of Agent-o-rama is built-in and requires no other dependency besides Rama, including high-performance, durable, and replicated storage of any data model that can be used as part of agents. Agent-o-rama also integrates seamlessly with any other tool, such as databases, vector stores, external APIs, or anything else. Unlike hosted observability tools, all data and traces stay within your infrastructure.
 
 Agent-o-rama integrates with [Langchain4j](https://docs.langchain4j.dev/) to capture detailed traces of model calls and embedding-store operations, and to stream model interactions to clients in real time. Integration is fully optional – if you prefer to use other APIs for model access, Agent-o-rama supports that as well.
 
@@ -348,5 +351,12 @@ See [this page](https://github.com/redplanetlabs/agent-o-rama/wiki/Actions,-rule
 
 ### Time-series telemetry
 
-TODO
-- split by metadata
+Agent-o-rama automatically tracks time-series telemetry for all aspects of agent execution.
+
+![Metrics dashboards 1](readme/telemetry1.png)
+![Metrics dashboards 2](readme/telemetry2.png)
+![Metrics dashboards 3](readme/telemetry3.png)
+
+You can also attach metadata to any agent invoke, and all time-series telemetry can be split by the values for each metadata key. So if one of your metadata keys is the choice of model to use, you can see how invokes, token counts, latencies, and everything else vary by choice of model.
+
+![Metrics dashboards 1](readme/telemetry-metadata.png)
