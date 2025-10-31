@@ -2,6 +2,7 @@
   (:use [com.rpl.rama]
         [com.rpl.rama.path])
   (:require
+   [cognitect.transit :as transit]
    [com.rpl.agent-o-rama.impl.types :as aor-types]
    [com.rpl.agent-o-rama.impl.ui :as ui]
    [com.rpl.agent-o-rama.impl.json-serialize :as jser]
@@ -9,7 +10,8 @@
    [clojure.string :as str])
   (:import
    [java.net URLEncoder URLDecoder]
-   [java.util UUID]))
+   [java.util UUID]
+   [java.io ByteArrayOutputStream]))
 
 (defn url-encode [s]
   "Encode string for safe use in URLs using standard URL encoding"
@@ -54,27 +56,66 @@
                      :invoke-id]
                     #(get implicit->real % %)))))
 
+(defn transit-serializable? [x]
+  (try
+    (with-open [out (ByteArrayOutputStream.)]
+      (let [w (transit/writer out :json)]
+        (transit/write w x))
+      true)
+    (catch Exception _ false)))
+
 (defn ->ui-serializable
-  [data]
-  (walk/postwalk
-   (fn [item]
-     (cond (satisfies? jser/JSONFreeze item)
-           (jser/json-freeze*-with-type item)
+  [item]
+  (cond (nil? item)
+        nil
+        
+        (satisfies? jser/JSONFreeze item)
+        (jser/json-freeze*-with-type item)
 
-           (instance? Throwable item)
-           (Throwable->map item)
+        (instance? Throwable item)
+        (Throwable->map item)
 
-           :else
-           item))
-   data))
+        (instance? java.util.List item)
+        (mapv ->ui-serializable item)
+        
+        (.isArray (class item))
+        (mapv ->ui-serializable item)
+        
+        (instance? java.util.SortedSet item)
+        (into (sorted-set) (mapv ->ui-serializable item))
+        
+        (instance? java.util.Set item)
+        (into #{} (mapv ->ui-serializable item))
+        
+        (instance? java.util.SortedMap item)
+        (into (sorted-map) (mapv (fn [[k v]] [(->ui-serializable k)
+                                              (->ui-serializable v)])
+                                 item))
+        
+        (instance? java.util.Map item)
+        (into {} (mapv (fn [[k v]] [(->ui-serializable k)
+                                    (->ui-serializable v)])
+                       item))
+
+        (or (boolean? item)
+            (number? item)
+            (char? item)
+            (keyword? item)
+            (uuid? item)
+            (instance? java.util.regex.Pattern item)
+            (transit-serializable? item))
+        item
+
+        :else
+        (str item)))
 
 (comment
   (def m (new dev.langchain4j.data.message.SystemMessage "test"))
   (->ui-serializable m)
-  ; {"text" "test", "_aor-type" "dev.langchain4j.data.message.SystemMessage"}
+  (->ui-serializable 3)
   (->ui-serializable (into-array [m]))
-  ; #object["[Ldev.langchain4j.data.message.SystemMessage;" 0x1f52c9ee "[Ldev.langchain4j.data.message.SystemMessage;@1f52c9ee"]
   )
+
 
 (defn from-ui-serializable
   [data]

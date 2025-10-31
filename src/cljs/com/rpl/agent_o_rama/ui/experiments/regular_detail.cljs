@@ -262,37 +262,41 @@
        {:title title-text}
        ($ :span.font-mono duration-text))))
 
+(defui TokenCountSingleCapsule [{:keys [token-count label]}]
+  (let [format-num (fn [n] (.toLocaleString n "en-US"))]
+    ($ :div.inline-flex.items-center.gap-1.5.bg-gray-100.rounded-sm.px-2.py-1
+       ($ :<>
+          ($ :span.text-sm.text-gray-900
+             (format-num token-count)))
+       ($ :span.text-xs.text-gray-500tracking-wide label))))
+
+(defui TokenCountCapsule [{:keys [input-token-count output-token-count total-token-count]}]
+  (let []
+    ($ :div.inline-flex.items-center.gap-1.5
+       ($ TokenCountSingleCapsule {:key "input" :label "input tokens" :token-count input-token-count})
+       ($ TokenCountSingleCapsule {:key "output" :label "output tokens" :token-count output-token-count})
+       ($ TokenCountSingleCapsule {:key "total" :label "total tokens" :token-count total-token-count}))))
+
 (defui EvaluatorCapsulesContainer [{:keys [run module-id columns-metadata]}]
-  (let [;; Calculate duration from agent-results
-        duration-ms (when-let [agent-results (:agent-results run)]
-                      (when-let [result (first (vals agent-results))]
-                        (when (and (:start-time-millis result)
-                                   (:finish-time-millis result))
-                          (unchecked-subtract (:finish-time-millis result)
-                                              (:start-time-millis result)))))]
-    ($ :div.mt-2.flex.flex-wrap.gap-1
-       ;; Render capsules for successful evaluations
-       (for [[eval-name metrics] (:evals run)
-             [metric-key metric-value] metrics]
-         ($ EvaluatorCapsule {:key (str eval-name metric-key)
-                              :eval-name eval-name
-                              :metric-key metric-key
-                              :metric-value metric-value
-                              :eval-invoke (get-in run [:eval-initiates eval-name])
-                              :module-id module-id
-                              :columns-metadata columns-metadata}))
-       ;; Render capsules for failed evaluations
-       (for [[eval-name failure-info] (:eval-failures run)]
-         ($ EvaluatorCapsule {:key (str eval-name "-failure")
-                              :eval-name eval-name
-                              :eval-failure failure-info
-                              :eval-invoke (get-in run [:eval-initiates eval-name])
-                              :module-id module-id
-                              :columns-metadata columns-metadata}))
-       ;; Render time capsule last if duration is available
-       (when duration-ms
-         ($ TimeCapsule {:key "time"
-                         :duration-ms duration-ms})))))
+  ($ :div.mt-2.flex.flex-wrap.gap-1
+     ;; Render capsules for successful evaluations
+     (for [[eval-name metrics] (:evals run)
+           [metric-key metric-value] metrics]
+       ($ EvaluatorCapsule {:key (str eval-name metric-key)
+                            :eval-name eval-name
+                            :metric-key metric-key
+                            :metric-value metric-value
+                            :eval-invoke (get-in run [:eval-initiates eval-name])
+                            :module-id module-id
+                            :columns-metadata columns-metadata}))
+     ;; Render capsules for failed evaluations
+     (for [[eval-name failure-info] (:eval-failures run)]
+       ($ EvaluatorCapsule {:key (str eval-name "-failure")
+                            :eval-name eval-name
+                            :eval-failure failure-info
+                            :eval-invoke (get-in run [:eval-initiates eval-name])
+                            :module-id module-id
+                            :columns-metadata columns-metadata}))))
 
 (defui CellContent [{:keys [content truncated? on-expand]}]
   (let [content-str (common/pp content)
@@ -310,12 +314,8 @@
 (defui TraceLinkCapsule [{:keys [module-id target-initiate]}]
   (let [target-agent-name (:agent-name target-initiate)
         target-invoke (:agent-invoke target-initiate)
-        task-id (or (:task-id target-invoke)
-                    (:taskId target-invoke)
-                    (when target-invoke (.-taskId target-invoke)))
-        invoke-id (or (:agent-invoke-id target-invoke)
-                      (:agentInvokeId target-invoke)
-                      (when target-invoke (.-agentInvokeId target-invoke)))
+        task-id (:task-id target-invoke)
+        invoke-id (:agent-invoke-id target-invoke)
         invoke-fragment (when (and task-id invoke-id)
                           (str task-id "-" invoke-id))
         trace-url (when invoke-fragment
@@ -475,15 +475,44 @@
                     ($ :tr.border-b {:key (str (:example-id run) "-" idx)}
                        ;; Input Cell
                        ($ :td {:className (:td common/table-classes)}
-                          ($ :div.flex.flex-col.items-start.gap-2
-                             ($ CellContent {:content (:input run)
-                                             :truncated? (not show-full-text?)
-                                             :on-expand #(state/dispatch [:modal/show :content-detail
-                                                                          {:title "Input"
-                                                                           :component ($ ContentModal {:content % :title "Input"})}])})
-                             (when target-initiate
-                               ($ TraceLinkCapsule {:module-id module-id
-                                                    :target-initiate target-initiate}))))
+                          (let [agent-result (get-in run [:agent-results 0])
+                                token-info (when agent-result
+                                             {:input-token-count (:input-token-count agent-result)
+                                              :output-token-count (:output-token-count agent-result)
+                                              :total-token-count (:total-token-count agent-result)})
+                                duration-ms (when agent-result
+                                              (when (and (:start-time-millis agent-result)
+                                                         (:finish-time-millis agent-result))
+                                                (unchecked-subtract (:finish-time-millis agent-result)
+                                                                    (:start-time-millis agent-result))))]
+                            ($ :div.flex.flex-col.items-start.gap-2
+                               ($ CellContent {:content (:input run)
+                                               :truncated? (not show-full-text?)
+                                               :on-expand #(state/dispatch [:modal/show :content-detail
+                                                                            {:title "Input"
+                                                                             :component ($ ContentModal {:content % :title "Input"})}])})
+                               (when (or duration-ms
+                                         (and token-info
+                                              (or (:total-token-count token-info)
+                                                  (:input-token-count token-info)
+                                                  (:output-token-count token-info))))
+                                 ($ :div.flex.flex-wrap.gap-1
+                                    (when duration-ms
+                                      ($ TimeCapsule {:key "time"
+                                                      :duration-ms duration-ms}))
+                                    (when (and token-info
+                                               (or (:total-token-count token-info)
+                                                   (:input-token-count token-info)
+                                                   (:output-token-count token-info)))
+                                      ($ TokenCountCapsule
+                                         {:key "tokens"
+                                          :input-token-count (:input-token-count token-info)
+                                          :output-token-count (:output-token-count token-info)
+                                          :total-token-count (:total-token-count token-info)}))))
+                               ;; Render time and token capsules on the same row
+                               (when target-initiate
+                                 ($ TraceLinkCapsule {:module-id module-id
+                                                      :target-initiate target-initiate})))))
                        ;; Reference Output Cell
                        ($ :td {:className (:td common/table-classes)}
                           ($ CellContent {:content (:reference-output run)
@@ -493,6 +522,7 @@
                                                                         :component ($ ContentModal {:content % :title "Reference Output"})}])}))
                        ;; Output Cell with evaluator capsules
                        (let [agent-result (get-in run [:agent-results 0])]
+                         (println "agent-result" agent-result)
                          ($ :td {:key "output-cell" :className (:td common/table-classes)}
                             (if agent-result
                               ;; If results exist, render the content (success or failure)

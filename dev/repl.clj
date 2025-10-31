@@ -27,9 +27,7 @@
   (close! ipc))
 
 (defn launch-for-playwright
-  "playwright tests assume these modules are launched.
-  unfortunately, research module needs OPENAI_API_KEY, and TAVILY_API_KEY in env
-  TODO port test to different module"
+  "playwright tests assume these modules are launched"
   [ipc]
 
   (start-repl ipc)
@@ -39,10 +37,6 @@
    basic-agent/BasicAgentModule
    {:tasks 1 :threads 1})
 
-  (rtest/launch-module!
-   ipc
-   research-agent/ResearchAgentModule
-   {:tasks 1 :threads 1})
   (rtest/launch-module!
    ipc
    e2e-test-agent/E2ETestAgentModule

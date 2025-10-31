@@ -105,16 +105,10 @@
                 :success ($ :div {:className (common/cn "w-3 h-3 bg-green-500 rounded-full")})
                 nil)))))))
 
-(defn pretty-format [item]
-  "Format data structure with proper indentation and formatting using pprint"
-  (if (string? item)
-    item
-    (with-out-str (clojure.pprint/pprint item))))
-
 (defui expandable-item-component [{:keys [item color title truncate-length]
                                    :or {truncate-length 50}}]
   (let [item-str (if (string? item) item (pr-str item))
-        pretty-str (pretty-format item)
+        pretty-str (common/pretty-format item)
         is-long? (> (count item-str) truncate-length)
         truncated-str (if is-long?
                         (str (subs item-str 0 (- truncate-length 3)) "...")
@@ -480,23 +474,23 @@
                          :graph-data graph-data
                          :module-id module-id})
 
-     ($ node-result-panel {:result result})
-
      ($ node-exceptions-panel {:exceptions exceptions})
-
-     ($ node-timing-panel {:start-time start-time
-                           :finish-time finish-time
-                           :duration duration})
 
      ($ node-input-panel {:input input})
 
      ($ node-operations-panel {:data data})
 
+     ($ node-result-panel {:result result})
+
      ($ node-emits-panel {:emits emits
                           :graph-data graph-data
                           :flow-nodes flow-nodes
                           :on-select-node on-select-node
-                          :on-paginate-node on-paginate-node})))
+                          :on-paginate-node on-paginate-node})
+
+     ($ node-timing-panel {:start-time start-time
+                           :finish-time finish-time
+                           :duration duration})))
 
 (defui selected-node-component [{:keys [selected-node graph-data on-paginate-node on-select-node flow-nodes module-id agent-name invoke-id]}]
   (let [data (when selected-node
