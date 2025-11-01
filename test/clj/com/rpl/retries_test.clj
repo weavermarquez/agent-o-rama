@@ -699,6 +699,9 @@
          )))
      (launch-module-without-eval-agent! ipc module {:tasks 4 :threads 2})
      (bind module-name (get-module-name module))
+     (bind manager (aor/agent-manager ipc module-name))
+     (bind foo (aor/agent-client manager "foo"))
+     (bind traces-query (:tracing-query (aor-types/underlying-objects foo)))
      (bind depot
        (foreign-depot ipc
                       module-name
@@ -707,14 +710,10 @@
        (foreign-pstate ipc
                        module-name
                        (po/agent-root-task-global-name "foo")))
-     (bind traces-query
-       (foreign-query ipc
-                      module-name
-                      (queries/tracing-query-name "foo")))
      (bind affected-aggs-query
        (foreign-query ipc
                       module-name
-                      (queries/agent-get-fork-affected-aggs-query-name "foo")))
+                      (queries/agent-get-fork-affected-aggs-query-name)))
 
      (bind [agent-task-id agent-id]
        (invoke-agent-and-wait! depot root-pstate []))
@@ -740,29 +739,34 @@
 
      (is (= #{start2 start3}
             (foreign-invoke-query affected-aggs-query
+                                  "foo"
                                   agent-task-id
                                   agent-id
                                   #{(inv-id "b2")})))
 
      (is (= #{start2}
             (foreign-invoke-query affected-aggs-query
+                                  "foo"
                                   agent-task-id
                                   agent-id
                                   #{(inv-id "b3")})))
 
      (is (empty?
           (foreign-invoke-query affected-aggs-query
+                                "foo"
                                 agent-task-id
                                 agent-id
                                 #{(inv-id "b4")})))
 
      (is (empty?
           (foreign-invoke-query affected-aggs-query
+                                "foo"
                                 agent-task-id
                                 agent-id
                                 #{(inv-id "start")})))
      (is (empty?
           (foreign-invoke-query affected-aggs-query
+                                "foo"
                                 agent-task-id
                                 agent-id
                                 #{(inv-id "b4") (inv-id "node1")
@@ -770,36 +774,42 @@
 
      (is (= #{start2}
             (foreign-invoke-query affected-aggs-query
+                                  "foo"
                                   agent-task-id
                                   agent-id
                                   #{start2})))
 
      (is (= #{start2 start3}
             (foreign-invoke-query affected-aggs-query
+                                  "foo"
                                   agent-task-id
                                   agent-id
                                   #{start3})))
 
      (is (empty?
           (foreign-invoke-query affected-aggs-query
+                                "foo"
                                 agent-task-id
                                 agent-id
                                 #{(inv-id "agg")})))
 
      (is (empty?
           (foreign-invoke-query affected-aggs-query
+                                "foo"
                                 agent-task-id
                                 agent-id
                                 #{(inv-id "agg3")})))
 
      (is (= #{start2}
             (foreign-invoke-query affected-aggs-query
+                                  "foo"
                                   agent-task-id
                                   agent-id
                                   #{(inv-id "agg2")})))
 
      (is (= #{start1 start2}
             (foreign-invoke-query affected-aggs-query
+                                  "foo"
                                   agent-task-id
                                   agent-id
                                   #{(inv-id "a1") (inv-id "b1")})))
@@ -1259,12 +1269,9 @@
          (foreign-pstate ipc
                          module-name
                          (po/agent-root-task-global-name "foo")))
-       (bind traces-query
-         (foreign-query ipc
-                        module-name
-                        (queries/tracing-query-name "foo")))
 
        (bind foo (aor/agent-client agent-manager "foo"))
+       (bind traces-query (:tracing-query (aor-types/underlying-objects foo)))
        (bind get-exceptions
          (fn [{:keys [task-id agent-invoke-id]}]
            (foreign-select-one [(keypath agent-invoke-id) :exception-summaries]

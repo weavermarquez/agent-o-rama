@@ -25,41 +25,41 @@
     CompletableFuture]))
 
 (defn tracing-query-name
-  [agent-name]
-  (str "_agent-get-trace-page-" agent-name))
+  []
+  "_agent-get-trace-page")
 
 (defn agent-get-names-query-name
   []
   "_agents-get-names")
 
 (defn agent-get-fork-affected-aggs-query-name
-  [agent-name]
-  (str "_agent-get-fork-affected-aggs-" agent-name))
+  []
+  "_agent-get-fork-affected-aggs")
 
 (defn agent-get-invokes-page-query-name
-  [agent-name]
-  (str "_agent-get-invokes-page-" agent-name))
+  []
+  "_agent-get-invokes-page")
 
 (defn fork-affected-aggs-query-task-global
-  [agent-name]
+  []
   (this-module-query-topology-task-global
-   (agent-get-fork-affected-aggs-query-name agent-name)))
+   (agent-get-fork-affected-aggs-query-name)))
 
 (defn agent-get-current-graph-name
-  [agent-name]
-  (str "_agent-get-current-graph-" agent-name))
+  []
+  "_agent-get-current-graph")
 
 (defn action-log-page-name
-  [agent-name]
-  (str "_agent-get-action-log-page-" agent-name))
+  []
+  "_agent-get-action-log-page")
 
 (defn search-metadata-name
-  [agent-name]
-  (str "_agent-search-metadata-" agent-name))
+  []
+  "_agent-search-metadata")
 
 (defn all-agent-metrics-name
-  [agent-name]
-  (str "_agent-all-metrics-" agent-name))
+  []
+  "_agent-all-metrics")
 
 (defn get-datasets-page-query-name
   []
@@ -137,14 +137,13 @@
   (.getHumanRequest node-exec invoke-id))
 
 (defn declare-tracing-query-topology
-  [topologies agent-name]
-  (let [topo-name    (tracing-query-name agent-name)
-        scratch-sym  (symbol (str "$$" topo-name "$$"))
-        nodes-pstate (symbol (po/agent-node-task-global-name agent-name))
-        node-exec    (symbol (po/agent-node-executor-name))]
+  [topologies]
+  (let [topo-name   (tracing-query-name)
+        scratch-sym (symbol (str "$$" topo-name "$$"))
+        node-exec   (symbol (po/agent-node-executor-name))]
     (<<query-topology topologies
       topo-name
-      [*agent-task-id *task-invoke-pairs *limit :> *res]
+      [*agent-name *agent-task-id *task-invoke-pairs *limit :> *res]
       (|direct *agent-task-id)
       (loop<- [*invokes-map {}
                *task-invoke-pairs (to-pqueue *task-invoke-pairs)
@@ -166,8 +165,9 @@
                                       :m  *invokes-map})
                             scratch-sym)
           (|direct *task-id)
+          (po/agent-node-task-global *agent-name :> $$nodes)
           (local-select> (keypath *invoke-id)
-                         nodes-pstate
+                         $$nodes
                          :> *all-invoke-info)
           (pending-human-request node-exec *invoke-id :> *human-request)
           (to-trace-invoke-info (into {} *all-invoke-info)
@@ -194,47 +194,47 @@
     )))
 
 (defn declare-fork-affected-aggs-query-topology
-  [topologies agent-name]
-  (let [root-sym  (symbol (po/agent-root-task-global-name agent-name))
-        nodes-sym (symbol (po/agent-node-task-global-name agent-name))]
-    (<<query-topology topologies
-      (agent-get-fork-affected-aggs-query-name agent-name)
-      [*agent-task-id *agent-id *forked-invoke-ids-set :> *res]
-      (|direct *agent-task-id)
-      (local-select> [(keypath *agent-id) :root-invoke-id]
-                     root-sym
-                     :> *root-invoke-id)
-      (loop<- [*invoke-id *root-invoke-id
-               *agg-context #{}
-               :> *agg-context]
-        (local-select> (keypath *invoke-id)
-                       nodes-sym
-                       :> {:keys [*started-agg? *emits *agg-invoke-id *node]})
-        (<<if *started-agg?
-          (conj *agg-context *invoke-id :> *curr-agg-context)
-         (else>)
-          (identity *agg-context :> *curr-agg-context))
-        (<<if (contains? *forked-invoke-ids-set *invoke-id)
-          (:> *curr-agg-context))
-        (anchor> <root>)
-        (<<if *started-agg?
-          (identity *agg-invoke-id :> *next-invoke-id)
-          (identity *agg-context :> *next-agg-context)
-          (anchor> <agg>))
-        (hook> <root>)
-        (ops/explode *emits
-                     :> {*next-invoke-id :invoke-id
-                         *task-id        :target-task-id})
-        (identity *curr-agg-context :> *next-agg-context)
-        (|direct *task-id)
-        (anchor> <reg>)
+  [topologies]
+  (<<query-topology topologies
+    (agent-get-fork-affected-aggs-query-name)
+    [*agent-name *agent-task-id *agent-id *forked-invoke-ids-set :> *res]
+    (|direct *agent-task-id)
+    (po/agent-root-task-global *agent-name :> $$root)
+    (local-select> [(keypath *agent-id) :root-invoke-id]
+                   $$root
+                   :> *root-invoke-id)
+    (loop<- [*invoke-id *root-invoke-id
+             *agg-context #{}
+             :> *agg-context]
+      (po/agent-node-task-global *agent-name :> $$nodes)
+      (local-select> (keypath *invoke-id)
+                     $$nodes
+                     :> {:keys [*started-agg? *emits *agg-invoke-id *node]})
+      (<<if *started-agg?
+        (conj *agg-context *invoke-id :> *curr-agg-context)
+       (else>)
+        (identity *agg-context :> *curr-agg-context))
+      (<<if (contains? *forked-invoke-ids-set *invoke-id)
+        (:> *curr-agg-context))
+      (anchor> <root>)
+      (<<if *started-agg?
+        (identity *agg-invoke-id :> *next-invoke-id)
+        (identity *agg-context :> *next-agg-context)
+        (anchor> <agg>))
+      (hook> <root>)
+      (ops/explode *emits
+                   :> {*next-invoke-id :invoke-id
+                       *task-id        :target-task-id})
+      (identity *curr-agg-context :> *next-agg-context)
+      (|direct *task-id)
+      (anchor> <reg>)
 
-        (unify> <agg> <reg>)
-        (continue> *next-invoke-id *next-agg-context))
-      (ops/explode *agg-context :> *invoke-id)
-      (|origin)
-      (aggs/+set-agg *invoke-id :> *res)
-    )))
+      (unify> <agg> <reg>)
+      (continue> *next-invoke-id *next-agg-context))
+    (ops/explode *agg-context :> *invoke-id)
+    (|origin)
+    (aggs/+set-agg *invoke-id :> *res)
+  ))
 
 (defn- items-pqueue
   ^PriorityQueue [item-compare-extractor]
@@ -330,8 +330,7 @@
   (let [task-id-sym (gen-anyvar "task-id")
         end-id-sym (gen-anyvar "end-id")
         task-page-sym (gen-anyvar "task-page")
-        pages-map-sym (gen-anyvar "pages-map")
-        pstate-sym (symbol pstate-name)]
+        pages-map-sym (gen-anyvar "pages-map")]
     [[|all]
      [ops/current-task-id :> task-id-sym]
      [get pagination-params task-id-sym (seg# max-key-fn) :> end-id-sym]
@@ -344,7 +343,7 @@
                                    {:inclusive? true
                                     :max-amt    (seg# adjust-page-size page-size)})
          (seg# transformed MAP-VALS info-transformer)]
-        pstate-sym
+        (seg# this-module-pobject-task-global pstate-name)
         :> task-page-sym]]
      [|origin]
      [aggs/+map-agg task-id-sym task-page-sym :> pages-map-sym]
@@ -375,12 +374,30 @@
                            STAY)
   ))
 
+
+;; like declare-get-distributed-page-topology, but for agent-specific PStates
+(defn declare-get-agent-distributed-page-topology
+  [topologies query-name pstate-name-fn info-transformer page-result-fn max-key-fn]
+  (<<query-topology topologies
+    query-name
+    [*agent-name *page-size *pagination-params :> *res]
+    (pstate-name-fn *agent-name :> *pstate-name)
+    (get-distributed-page* *page-size
+                           *pagination-params
+                           *pstate-name
+                           *res
+                           info-transformer
+                           page-result-fn
+                           max-key-fn
+                           STAY)
+  ))
+
 (defn declare-get-invokes-page-topology
-  [topologies agent-name]
-  (declare-get-distributed-page-topology
+  [topologies]
+  (declare-get-agent-distributed-page-topology
    topologies
-   (agent-get-invokes-page-query-name agent-name)
-   (po/agent-root-task-global-name agent-name)
+   (agent-get-invokes-page-query-name)
+   po/agent-root-task-global-name
    relevant-invoke-submap
    to-invokes-page-result
    h/max-uuid))
@@ -394,12 +411,12 @@
     (identity agent-names :> *res)))
 
 (defn declare-get-current-graph
-  [topologies agent-name]
+  [topologies]
   (<<query-topology topologies
-    (agent-get-current-graph-name agent-name)
-    [:> *res]
+    (agent-get-current-graph-name)
+    [*agent-name :> *res]
     (|origin)
-    (graph/graph->historical-graph-info (po/agent-graph-task-global agent-name)
+    (graph/graph->historical-graph-info (po/agent-graph-task-global *agent-name)
                                         :> *res)
   ))
 
@@ -936,11 +953,11 @@
 ;;    ...]
 ;;  :pagination-params {task-id end-id}}
 (defn declare-get-action-log-page-topology
-  [topologies agent-name]
+  [topologies]
   (let [pstate-name (po/action-log-task-global-name)]
     (<<query-topology topologies
-      (action-log-page-name agent-name)
-      [*rule-name *page-size *pagination-params :> *res]
+      (action-log-page-name)
+      [*agent-name *rule-name *page-size *pagination-params :> *res]
       (get-distributed-page* *page-size
                              *pagination-params
                              pstate-name
@@ -948,7 +965,7 @@
                              action-log-info
                              to-action-log-page-result
                              h/max-uuid
-                             (keypath agent-name *rule-name))
+                             (keypath *agent-name *rule-name))
     )))
 
 (defn add-implicit-metadata
@@ -962,51 +979,51 @@
 
 ;; returns {:metadata [{:name ... :examples #{...}} ...] :pagination-params ...}
 (defn declare-search-metadata-topology
-  [topologies agent-name]
-  (let [shared-streaming-sym (symbol (po/agent-stream-shared-task-global-name agent-name))]
-    (<<query-topology topologies
-      (search-metadata-name agent-name)
-      [*search-string *limit *next-key :> *res]
-      (|direct 0)
-      (str/lower-case *search-string :> *search-string-lower)
-      (<<ramafn %filter
-        [*name _]
-        (<<cond
-         (case> (not (h/contains-string? (str/lower-case (str *name)) *search-string-lower)))
-          (:> nil nil)
+  [topologies]
+  (<<query-topology topologies
+    (search-metadata-name)
+    [*agent-name *search-string *limit *next-key :> *res]
+    (|direct 0)
+    (str/lower-case *search-string :> *search-string-lower)
+    (<<ramafn %filter
+      [*name _]
+      (<<cond
+       (case> (not (h/contains-string? (str/lower-case (str *name)) *search-string-lower)))
+        (:> nil nil)
 
-         (default>)
-          (:> {:name *name} nil)))
-      (search-loop shared-streaming-sym
-                   (path> :metadata)
-                   %filter
-                   *limit
-                   *next-key
-                   false
-                   :> *items *page-key)
-      (|origin)
-      (hash-map :metadata
-                (add-implicit-metadata *items *search-string-lower)
-                :pagination-params
-                *page-key
-                :> *res)
-    )))
+       (default>)
+        (:> {:name *name} nil)))
+    (po/agent-stream-shared-task-global *agent-name :> $$shared-streaming)
+    (search-loop $$shared-streaming
+                 (path> :metadata)
+                 %filter
+                 *limit
+                 *next-key
+                 false
+                 :> *items *page-key)
+    (|origin)
+    (hash-map :metadata
+              (add-implicit-metadata *items *search-string-lower)
+              :pagination-params
+              *page-key
+              :> *res)
+  ))
 
 (defn declare-all-agent-metrics-topology
-  [topologies agent-name]
-  (let [telemetry-sym (symbol (po/agent-telemetry-task-global-name agent-name))]
-    (<<query-topology topologies
-      (all-agent-metrics-name agent-name)
-      [:> *res]
-      (|all)
-      (local-select>
-       [(keypath 60) MAP-KEYS]
-       telemetry-sym
-       {:allow-yield? true}
-       :> *metric-id)
-      (|origin)
-      (aggs/+set-agg *metric-id :> *res)
-    )))
+  [topologies]
+  (<<query-topology topologies
+    (all-agent-metrics-name)
+    [*agent-name :> *res]
+    (|all)
+    (po/agent-telemetry-task-global *agent-name :> $$telemetry)
+    (local-select>
+     [(keypath 60) MAP-KEYS]
+     $$telemetry
+     {:allow-yield? true}
+     :> *metric-id)
+    (|origin)
+    (aggs/+set-agg *metric-id :> *res)
+  ))
 
 ;; direct queries on PStates
 

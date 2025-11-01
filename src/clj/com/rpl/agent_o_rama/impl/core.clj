@@ -33,6 +33,8 @@
     ExperimentEvent
     NodeOp
     RuleEvent]
+   [com.rpl.rama
+    QueryTopologyClient]
    [java.util.concurrent
     CompletableFuture]))
 
@@ -157,13 +159,6 @@
      po/AGENT-TELEMETRY-PSTATE-SCHEMA)
 
     (retries/declare-check-impl mb-topology agent-name)
-    (queries/declare-tracing-query-topology topologies agent-name)
-    (queries/declare-fork-affected-aggs-query-topology topologies agent-name)
-    (queries/declare-get-invokes-page-topology topologies agent-name)
-    (queries/declare-get-current-graph topologies agent-name)
-    (queries/declare-get-action-log-page-topology topologies agent-name)
-    (queries/declare-search-metadata-topology topologies agent-name)
-    (queries/declare-all-agent-metrics-topology topologies agent-name)
 
     (<<sources stream-topology
      (source> agent-config-depot-sym {:retry-mode :all-after} :> *data)
@@ -349,6 +344,15 @@
   (queries/declare-search-evaluators-query-topology topologies)
   (queries/declare-search-experiments-query-topology topologies)
   (queries/declare-experiment-results-query-topology topologies)
+
+  (queries/declare-fork-affected-aggs-query-topology topologies)
+  (queries/declare-get-current-graph topologies)
+  (queries/declare-get-invokes-page-topology topologies)
+  (queries/declare-tracing-query-topology topologies)
+  (queries/declare-get-action-log-page-topology topologies)
+  (queries/declare-search-metadata-topology topologies)
+  (queries/declare-all-agent-metrics-topology topologies)
+
   (doseq [[agent-name agent-graph] agent-graphs]
     (define-agent! agent-name
                    setup
@@ -436,3 +440,15 @@
         )))
      ret
    )))
+
+
+(defn delegating-query
+  [agent-name delegate]
+  (reify
+   QueryTopologyClient
+   (invoke [this args]
+     (let [new-args (cons agent-name args)]
+       (apply foreign-invoke-query delegate new-args)))
+   (invokeAsync [this args]
+     (let [new-args (cons agent-name args)]
+       (apply foreign-invoke-query-async delegate new-args)))))
