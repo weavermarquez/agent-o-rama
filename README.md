@@ -273,7 +273,7 @@ rama scaleExecutors \
 
 ### Viewing agent traces
 
-A trace of every agent invoke is viewable in the Agent-o-rama web UI. Every aspect of execution is captured, including node emits, node timings, model calls, token counts, database read/write latencies, tool calls, subagent invokes, and much more. On the right is aggregated stats across all node.
+A trace of every agent invoke is viewable in the Agent-o-rama web UI. Every aspect of execution is captured, including node emits, node timings, model calls, token counts, database read/write latencies, tool calls, subagent invokes, and much more. On the right is aggregated stats across all nodes.
 
 ![Agent invoke trace](readme/trace.png)
 
