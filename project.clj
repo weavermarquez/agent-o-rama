@@ -108,6 +108,8 @@
                          com.rpl.agent-o-rama.store
                          com.rpl.agent-o-rama.throttled-logging
                          com.rpl.agent-o-rama.tools]}
+  :deploy-repositories [["releases"
+                         {:url "https://nexus.redplanetlabs.com/repository/maven-public-releases"}]]
   :aliases {"test-all" ["with-profile" "+examples" "test"]}
   :plugins [[lein-exec "0.3.7"]
             [lein-codox "0.10.8"]
