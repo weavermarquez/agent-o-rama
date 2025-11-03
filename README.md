@@ -1,6 +1,6 @@
 # Agent-o-rama
 
-Agent-o-rama is a library for building scalable and stateful AI agents on the JVM. Agent-o-rama provides two first-class APIs, one for Java and one for Clojure, with feature parity between them.
+Agent-o-rama is a library for building scalable and stateful LLM agents on the JVM. Agent-o-rama provides two first-class APIs, one for Java and one for Clojure, with feature parity between them.
 
 Building LLM-based applications requires being rigorous about testing and monitoring. Inspired by [LangGraph](https://www.langchain.com/langgraph) and [LangSmith](https://www.langchain.com/langsmith/observability), Agent-o-rama provides similar capabilities to support the end-to-end workflow of building LLM applications: datasets and experiments for evaluation, and detailed tracing, online evaluation, and time-series telemetry (e.g. model latency, token usage, database latency) for observability. All of this is exposed in a comprehensive web UI.
 
