@@ -534,10 +534,9 @@ Here are the sections to reflect on for writing: %s")
              instr     (section-writer-instructions persona)
              section   (chat-and-get-text
                         openai
-                        (concat
-                         [(SystemMessage. instr)]
-                         [(UserMessage. (str "Here is the interview:\n" interview))
-                          (UserMessage. (str "Here are the sources:\n" context))]))]
+                        [(SystemMessage. instr)
+                         (UserMessage. (str "Here is the interview:\n" interview))
+                         (UserMessage. (str "Here are the sources:\n" context))])]
          (aor/emit! agent-node "agg-sections" section)
        )))
     (aor/agg-node
@@ -561,9 +560,8 @@ Here are the sections to reflect on for writing: %s")
              instr  (report-writer-instructions topic sections)
              text   (chat-and-get-text
                      openai
-                     (concat
-                      [(SystemMessage. instr)]
-                      [(UserMessage. "Write a report based upon these memos.")]))]
+                     [(SystemMessage. instr)
+                      (UserMessage. "Write a report based upon these memos.")])]
          (aor/emit! agent-node "finish-report" "report" text)
        )))
     (aor/node
@@ -574,9 +572,8 @@ Here are the sections to reflect on for writing: %s")
              instr  (intro-conclusion-instructions topic sections)
              text   (chat-and-get-text
                      openai
-                     (concat
-                      [(SystemMessage. instr)]
-                      [(UserMessage. "Write the report introduction")]))]
+                     [(SystemMessage. instr)
+                      (UserMessage. "Write the report introduction")])]
          (aor/emit! agent-node "finish-report" "intro" text)
        )))
     (aor/node
@@ -587,9 +584,8 @@ Here are the sections to reflect on for writing: %s")
              instr  (intro-conclusion-instructions topic sections)
              text   (chat-and-get-text
                      openai
-                     (concat
-                      [(SystemMessage. instr)]
-                      [(UserMessage. "Write the report conclusion")]))]
+                     [(SystemMessage. instr)
+                      (UserMessage. "Write the report conclusion")])]
          (aor/emit! agent-node "finish-report" "conclusion" text)
        )))
     (aor/agg-node
