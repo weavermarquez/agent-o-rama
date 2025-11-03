@@ -4,9 +4,7 @@ import com.rpl.agentorama.*;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import dev.langchain4j.web.search.tavily.TavilyWebSearchEngine;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
+import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
@@ -46,7 +44,16 @@ public class ReActModule extends AgentModule {
     topology.newToolsAgent("tools", ToolsFactory.createTools());
 
     topology.newAgent("ReActAgent")
-            .node("chat", "chat", (AgentNode agentNode, List<ChatMessage> messages) -> {
+            .node("chat", "chat", (AgentNode agentNode, List<Object> inputMessages) -> {
+              // allow messages to be strings so this can be invoked more easily from the UI
+              List<ChatMessage> messages = new ArrayList();
+              for(Object m: inputMessages) {
+                if(m instanceof String) {
+                  messages.add(new UserMessage((String) m));
+                } else {
+                  messages.add((ChatMessage) m);
+                }
+              }
               ChatModel openai = agentNode.getAgentObject("openai");
               AgentClient tools = agentNode.getAgentClient("tools");
 

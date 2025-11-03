@@ -3,31 +3,23 @@ package com.rpl.agent.react;
 import com.rpl.agentorama.*;
 import com.rpl.rama.test.InProcessCluster;
 import com.rpl.rama.test.LaunchConfig;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
-import java.time.Instant;
 import java.util.*;
 import java.io.*;
 
 /**
  * Main class for running the ReAct agent example.
  *
- * <p>This example demonstrates how to create and run a ReAct (Reasoning and Acting) agent that can
- * search the web and answer questions using the agent-o-rama framework.
+ * This example demonstrates how to create and run a ReAct (Reasoning and Acting) agent that can
+ * search the web and answer questions.
  *
- * <p>The agent uses: - OpenAI GPT-4o-mini for language processing - Tavily for web search
- * capabilities - ReAct pattern for alternating between reasoning and action
+ * The agent uses OpenAI GPT-4o-mini for language processing and Tavily for web search
+ * capabilities
  *
- * <p>Required environment variables:
- * <ul>
- *   <li>OPENAI_API_KEY: Your OpenAI API key</li>
- *   <li>TAVILY_API_KEY: Your * Tavily search API key</li>
- * </ul>
+ * Required environment variables:
+ *   - OPENAI_API_KEY: Your OpenAI API key
+ *   - TAVILY_API_KEY: Your * Tavily search API key
  */
 public class ReActExample {
-
-  private static final String SYSTEM_PROMPT = "You are a helpful AI assistant.\n\nSystem time: %s";
-
   private static void validateEnvironmentVariables() {
     String openaiKey = System.getenv("OPENAI_API_KEY");
     String tavilyKey = System.getenv("TAVILY_API_KEY");
@@ -50,10 +42,7 @@ public class ReActExample {
       System.out.println("Classpath: " + System.getProperty("java.class.path"));
       return;
     }
-
     validateEnvironmentVariables();
-
-
     System.out.println("Starting ReAct Agent Example...");
 
     try (InProcessCluster ipc = InProcessCluster.create()) {
@@ -70,11 +59,7 @@ public class ReActExample {
         System.out.print("Ask your question (agent has web search access): ");
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         String userInput = reader.readLine();
-        List messages =
-            Arrays.asList(
-                SystemMessage.from(String.format(SYSTEM_PROMPT, Instant.now())),
-                UserMessage.from(userInput));
-        Object result = agent.invoke(messages);
+        Object result = agent.invoke(Arrays.asList(userInput));
 
         System.out.println("\nAgent: " + result);
         System.out.println();
