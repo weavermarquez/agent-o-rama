@@ -16,22 +16,24 @@
     ScheduledThreadPoolExecutor
     TimeUnit]))
 
-(defn refresh-agent-modules! []
+(defn refresh-agent-modules!
+  []
   (let [rama-client (ui/get-object :rama-client)
-        modules (deployed-module-names rama-client)]
+        modules     (deployed-module-names rama-client)]
     (when (empty? modules) (setval [ATOM :aor-cache] {} ui/system))
+    (cljlogging/trace "Refreshing agent from modules" {:modules modules})
     (doseq [mod modules]
       (let [manager (try
                       (aor/agent-manager rama-client mod)
                       (catch Exception e
-                        ;; TODO once we have logging, log this.
-                        ;; this is where it fails when aor updates and old modules need updating
+                        (cljlogging/trace e "AOR not found in module" {:module mod})
                         ::no-aor))]
         (when-not (= ::no-aor manager)
           (setval [ATOM :aor-cache (keypath mod) :manager]
                   manager
                   ui/system)
           (let [agent-names (aor/agent-names manager)]
+            (cljlogging/trace "Found agents" {:agent-names agent-names :module mod})
             (doseq [agent-name agent-names]
               ;; nil? so that it doesn't waste resources on uneeded clients
               ;; doesn't use constantly because that evals its body
