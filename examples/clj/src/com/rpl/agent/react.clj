@@ -12,9 +12,6 @@
   (:import
    [dev.langchain4j.data.document
     Document]
-   [dev.langchain4j.data.message
-    SystemMessage
-    UserMessage]
    [dev.langchain4j.model.openai
     OpenAiChatModel]
    [dev.langchain4j.web.search
@@ -108,11 +105,5 @@
           _ (print "Ask your question (agent has web search access): ")
           _ (flush)
           ^String user-input (read-line)
-          result        (aor/agent-invoke
-                         agent
-                         [(SystemMessage/from
-                           (format
-                            "You are a helpful AI assistant. System time: %s"
-                            (.toString (java.time.Instant/now))))
-                          (UserMessage. user-input)])]
+          result        (aor/agent-invoke agent [user-input])]
       (println result))))
