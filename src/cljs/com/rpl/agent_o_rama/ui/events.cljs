@@ -14,70 +14,88 @@
 
 (defn build-drawable-graph
   "Traverses the raw graph data to produce a coherent, drawable graph.
-   It builds the set of reachable nodes, real edges, and implicit edges in a single pass."
+   It builds the set of reachable nodes, real edges, and implicit edges in a single pass.
+   
+   Filters out incomplete nodes (nodes without a :node field) which can occur due to
+   backend race conditions where PState is queried before node execution populates all fields."
   [raw-nodes root-invoke-id historical-graph]
   (if (or (empty? raw-nodes) (not (get raw-nodes root-invoke-id)))
-    ;; We can't start drawing until the root node is available.
-    {:nodes {} :real-edges [] :implicit-edges []}
-    (loop [to-visit #{root-invoke-id} ; A queue of nodes to process
-           drawable-nodes {} ; The final map of nodes to render
-           real-edges [] ; The final list of real edges
-           implicit-edges [] ; The final list of implicit edges
+    {:nodes {} :edges [] :implicit-edges []}
+    (loop [to-visit #{root-invoke-id}
+           drawable-nodes {}
+           real-edges []
+           implicit-edges []
            visited #{}]
       (if (empty? to-visit)
-        ;; The traversal is complete.
         {:nodes drawable-nodes :edges real-edges :implicit-edges implicit-edges}
         (let [current-id (first to-visit)
               remaining-to-visit (disj to-visit current-id)]
 
           (if (visited current-id)
-            ;; If we've already processed this node, skip it.
             (recur remaining-to-visit drawable-nodes real-edges implicit-edges visited)
 
             (let [node-data (get raw-nodes current-id)
-                  node-name (:node node-data)
-                  static-info (get-in historical-graph [:node-map node-name])
+                  node-name (:node node-data)]
 
-                  ;; 1. FIND REAL EDGES & CHILDREN
-                  emitted-ids (set (map :invoke-id (:emits node-data)))
-                  drawable-children (filter #(contains? raw-nodes %) emitted-ids)
-                  new-real-edges (map (fn [child-id]
-                                        {:id (str "real-" current-id "-" child-id)
-                                         :source (str current-id)
-                                         :target (str child-id)})
-                                      drawable-children)
+              ;; Skip incomplete nodes (race condition: node started but :node field not yet populated)
+              (if-not node-name
+                (recur remaining-to-visit drawable-nodes real-edges implicit-edges (conj visited current-id))
 
-                  ;; 2. FIND IMPLICIT EDGES
-                  agg-context (:agg-context static-info)
-                  potential-outputs (:output-nodes static-info)
-                  extra-visits-vol (volatile! #{})
-                  new-implicit-edges (when (and agg-context
-                                                (not (contains? node-data :node-task-id)))
-                                       (->> potential-outputs
-                                            (filter #(= :agg-node (get-in historical-graph [:node-map % :node-type])))
-                                            (mapcat (fn [out-agg-node-name]
-                                                      (let [agg-node-invoke-id (:agg-invoke-id node-data)]
-                                                        ;; Check if a real emit to this agg node already exists
-                                                        (when (and agg-node-invoke-id
-                                                                   (not (contains? emitted-ids agg-node-invoke-id))
-                                                                   (contains? raw-nodes agg-node-invoke-id))
+                (let [static-info (get-in historical-graph [:node-map node-name])
 
-                                                          (when (not (contains? visited agg-node-invoke-id))
-                                                            (vswap! extra-visits-vol conj agg-node-invoke-id))
+                      ;; 1. FIND REAL EDGES & CHILDREN
+                      ;; Filter out incomplete nodes (no :node field) from children
+                      emitted-ids (set (map :invoke-id (:emits node-data)))
+                      drawable-children (filter (fn [child-id]
+                                                  (and (contains? raw-nodes child-id)
+                                                       (:node (get raw-nodes child-id))))
+                                                emitted-ids)
 
-                                                          [{:id (str "implicit-" current-id "-" agg-node-invoke-id)
-                                                            :source (str current-id)
-                                                            :target (str agg-node-invoke-id)
-                                                            :implicit? true}]))))
-                                            (filter some?)
-                                            (vec)))]
+                      new-real-edges (for [child-id drawable-children]
+                                       {:id (str "real-" current-id "-" child-id)
+                                        :source (str current-id)
+                                        :target (str child-id)})
 
-              ;; 3. RECURSE
-              (recur (into remaining-to-visit (concat drawable-children @extra-visits-vol))
-                     (assoc drawable-nodes current-id node-data)
-                     (into real-edges new-real-edges)
-                     (into implicit-edges (or new-implicit-edges []))
-                     (conj visited current-id)))))))))
+                      ;; 2. FIND IMPLICIT EDGES (for aggregation contexts)
+                      agg-context (:agg-context static-info)
+                      is-agg-start? (and agg-context (not (:node-task-id node-data)))
+
+                      {implicit-targets :targets
+                       implicit-edge-list :edges}
+                      (if-not is-agg-start?
+                        {:targets [] :edges []}
+                        (let [potential-outputs (:output-nodes static-info)
+                              agg-node-invoke-id (:agg-invoke-id node-data)]
+                          (reduce
+                           (fn [acc out-node-name]
+                             (let [is-agg-node? (= :agg-node (get-in historical-graph [:node-map out-node-name :node-type]))
+                                   agg-node-data (get raw-nodes agg-node-invoke-id)]
+                               ;; Only create implicit edge if:
+                               ;; - It's an agg node
+                               ;; - The agg node exists and is complete (has :node field)
+                               ;; - We haven't visited it yet
+                               ;; - There's no explicit emit to it already
+                               (if (and is-agg-node?
+                                        agg-node-invoke-id
+                                        agg-node-data
+                                        (:node agg-node-data) ; ← Filter incomplete nodes
+                                        (not (contains? visited agg-node-invoke-id))
+                                        (not (contains? emitted-ids agg-node-invoke-id)))
+                                 {:targets (conj (:targets acc) agg-node-invoke-id)
+                                  :edges (conj (:edges acc)
+                                               {:id (str "implicit-" current-id "-" agg-node-invoke-id)
+                                                :source (str current-id)
+                                                :target (str agg-node-invoke-id)
+                                                :implicit? true})}
+                                 acc)))
+                           {:targets [] :edges []}
+                           (or potential-outputs []))))]
+
+                  (recur (into remaining-to-visit (concat drawable-children implicit-targets))
+                         (assoc drawable-nodes current-id node-data)
+                         (into real-edges new-real-edges)
+                         (into implicit-edges implicit-edge-list)
+                         (conj visited current-id)))))))))))
 
 ;; =============================================================================
 ;; ROBUST STREAMING LOOP WITH STATE MANAGEMENT
@@ -97,9 +115,7 @@
                    (state/dispatch [:invocation/fetch-graph-page
                                     {:invoke-id invoke-id
                                      :module-id module-id
-                                     :agent-name agent-name
-                                     :leaves []
-                                     :initial? true}])
+                                     :agent-name agent-name}])
                    nil))
 
 ;; =============================================================================
@@ -108,14 +124,12 @@
 
 ;; Kick off or continue fetching a page of graph data
 (state/reg-event :invocation/fetch-graph-page
-                 (fn [db {:keys [invoke-id module-id agent-name leaves initial?]}]
+                 (fn [db {:keys [invoke-id module-id agent-name]}]
                    (sente/request!
                     [:invocations/get-graph-page
                      {:invoke-id invoke-id
                       :module-id module-id
-                      :agent-name agent-name
-                      :leaves (or leaves [])
-                      :initial? (boolean initial?)}]
+                      :agent-name agent-name}]
                     10000
                     (fn [reply]
                       (if (:success reply)
@@ -131,14 +145,13 @@
 
 (state/reg-event :invocation/process-graph-page
                  (fn [db invoke-id page-data]
-                   (let [{:keys [nodes next-leaves summary historical-graph root-invoke-id
+                   (let [{:keys [nodes summary historical-graph root-invoke-id
                                  task-id is-complete]} page-data
                          current-invocation (get-in db [:current-invocation])]
 
-                     ;; Always update the summary and completion status first.
+                     ;; Update summary data
                      (when summary
                        (let [{:keys [forks fork-of]} summary
-                             ;; Build key-value pairs conditionally
                              kvps (cond-> [[[:invocations-data invoke-id :summary] summary]
                                            [[:invocations-data invoke-id :task-id] task-id]
                                            [[:invocations-data invoke-id :forks] forks]
@@ -151,59 +164,27 @@
                                     (conj [[:invocations-data invoke-id :root-invoke-id] root-invoke-id]))]
                          (state/dispatch (into [:db/set-values] kvps))))
 
-                     (when (contains? page-data :is-complete)
+                     ;; ATOMIC UPDATE: Merge nodes AND set is-complete in single dispatch
+                     ;; This prevents React from rendering between updates
+                     (when (and nodes (seq nodes))
+                       (state/dispatch [:invocation/merge-nodes-and-complete
+                                        invoke-id
+                                        nodes
+                                        root-invoke-id
+                                        is-complete]))
+
+                     ;; If no nodes but we have is-complete, update it
+                     (when (and (not (seq nodes)) (contains? page-data :is-complete))
                        (state/dispatch [:db/set-value [:invocations-data invoke-id :is-complete] is-complete]))
 
-                     ;; Then merge the new nodes into the existing graph.
-                     (when (and nodes (seq nodes))
-                       (state/dispatch [:invocation/merge-nodes invoke-id nodes root-invoke-id]))
-
-                     ;; Now, decide on the next action based on the server response.
-                     ;; Define a more robust completion condition.
-                     ;; An agent is only *truly* finished from the UI's perspective
-                     ;; when the backend says it's complete AND the final result
-                     ;; is present in the summary.
-                     (let [summary-has-result? (some? (:result summary))
-                           is-truly-complete? (and is-complete summary-has-result?)]
-
-                       (cond
-                         ;; If the agent is truly complete, stop.
-                         is-truly-complete?
-                         (do
-                           ;; Make sure to set the final is-complete flag to true in the DB
-                           ;; in case the initial `is-complete` was a false positive.
-                           (state/dispatch [:db/set-value [:invocations-data invoke-id :is-complete] true])
-                           (println "[POLLING-STATEFUL] Loop ended (truly complete).")
-                           nil)
-
-                         ;; If there are immediate next leaves, fast-poll.
-                         (seq next-leaves)
-                         (do
-                           (println "[POLLING-STATEFUL] Fast pagination: continuing...")
-                           (state/dispatch [:invocation/fetch-graph-page
-                                            (assoc current-invocation :leaves (vec next-leaves) :initial? false)]))
-
-                         ;; Otherwise (including the race condition case), schedule a slow poll.
-                         :else
-                         (do
-                           (println "[POLLING-STATEFUL] Scheduling delayed re-poll (race condition or idle).")
-                           (js/setTimeout
-                            (fn []
-                              (let [current-db @state/app-db
-                                    ;; Check the robust completion flag again before re-polling
-                                    is-still-incomplete? (not (and (get-in current-db [:invocations-data invoke-id :is-complete])
-                                                                   (get-in current-db [:invocations-data invoke-id :summary :result])))
-                                    current-leaves (state/get-unfinished-leaves current-db invoke-id)]
-
-                                (if-not is-still-incomplete?
-                                  (println "[POLLING-STATEFUL] Delayed re-poll cancelled (agent completed).")
-                                  (do
-                                    (state/dispatch [:db/update-value [:invocations-data invoke-id :idle-polls] (fnil inc 0)])
-                                    (println "[POLLING-STATEFUL] Delayed re-poll executing.")
-                                    (state/dispatch [:invocation/fetch-graph-page
-                                                     (assoc current-invocation :leaves current-leaves :initial? false)])))))
-                            ;; Use a slightly shorter poll interval to resolve the race condition quickly.
-                            500))))
+                     ;; SIMPLIFIED POLLING: If not complete, schedule a simple poll
+                     (when-not is-complete
+                       (js/setTimeout
+                        (fn []
+                          (when-not (get-in @state/app-db [:invocations-data invoke-id :is-complete])
+                            (println "[POLLING-SIMPLIFIED] Polling for updates...")
+                            (state/dispatch [:invocation/fetch-graph-page current-invocation])))
+                        1000))
 
                      nil)))
 
@@ -225,6 +206,26 @@
                        [:graph :nodes (s/terminal-val nodes)]
                        [:graph :edges (s/terminal-val edges)]
                        [:implicit-edges (s/terminal-val implicit-edges)])])))
+
+(state/reg-event :invocation/merge-nodes-and-complete
+                 (fn [db invoke-id new-nodes-map root-invoke-id-from-payload is-complete]
+                   (let [historical-graph (get-in db [:invocations-data invoke-id :historical-graph])
+                         current-raw-nodes (get-in db [:invocations-data invoke-id :graph :raw-nodes])
+                         merged-raw-nodes (merge current-raw-nodes new-nodes-map)
+                         root-invoke-id (or root-invoke-id-from-payload
+                                            (get-in db [:invocations-data invoke-id :root-invoke-id]))
+
+                         {:keys [nodes edges implicit-edges]}
+                         (build-drawable-graph merged-raw-nodes root-invoke-id historical-graph)]
+
+                     ;; ATOMIC: Update both graph nodes AND is-complete in single transformation
+                     [:invocations-data invoke-id
+                      (s/multi-path
+                       [:graph :raw-nodes (s/terminal-val merged-raw-nodes)]
+                       [:graph :nodes (s/terminal-val nodes)]
+                       [:graph :edges (s/terminal-val edges)]
+                       [:implicit-edges (s/terminal-val implicit-edges)]
+                       [:is-complete (s/terminal-val is-complete)])])))
 
 (state/reg-event :invocation/cleanup
                  (fn [db {:keys [invoke-id]}]
