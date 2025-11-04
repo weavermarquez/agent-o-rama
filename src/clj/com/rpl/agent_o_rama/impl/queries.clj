@@ -154,10 +154,8 @@
          (else>)
           (peek *task-invoke-pairs :> [*task-id *invoke-id])
           (pop *task-invoke-pairs :> *next-task-invoke-pairs)
-          ;; - do it this way so that agg-invokes-map and
-          ;; task-invoke-pairs
-          ;; don't have to be potentially copied around the cluster for
-          ;; every
+          ;; - do it this way so that agg-invokes-map and task-invoke-pairs
+          ;; don't have to be potentially copied around the cluster for every
           ;; fetch
           ;; - only *invoke-id, *agent-task-id, and *invoke-info cross
           ;; partitioner boundaries

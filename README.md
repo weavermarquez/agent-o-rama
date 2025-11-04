@@ -324,7 +324,7 @@ Datasets of examples can be created and managed via the UI or API. Examples can 
 
 ### Running experiments
 
-Datasets can then be used to run experiments to track agent performance, do regression testing, or test new agents. Experiments can be run on entire agents or on individual nodes of an agent. A single target can be tested at a time, or comparative experiments can be done to evaluate multiple different targets (e.g. the same agent paramterized to use different models).
+Datasets can then be used to run experiments to track agent performance, do regression testing, or test new agents. Experiments can be run on entire agents or on individual nodes of an agent. A single target can be tested at a time, or comparative experiments can be done to evaluate multiple different targets (e.g. the same agent parameterized to use different models).
 
 ![Experiments list](readme/experiments.png)
 
@@ -348,7 +348,7 @@ Online evaluation gets added as feedback on the run that is viewable in traces, 
 
 Here's an example of creating an action to add slow runs to a dataset:
 
-![Add to dataset](readme/action-eval.png)
+![Add to dataset](readme/action-dataset.png)
 
 See [this page](https://github.com/redplanetlabs/agent-o-rama/wiki/Actions,-rules,-and-telemetry) for the details on creating actions.
 
