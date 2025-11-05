@@ -479,9 +479,9 @@
 (defmethod json-thaw* (.getName ToolExecution)
   [m]
   (-> (ToolExecution/builder)
-      (.request (maybe-json-thaw* (get m "request")))
-      (.result (get m "result"))
-      .build))
+      (.request ^ToolExecutionRequest (maybe-json-thaw* (get m "request")))
+      (.result ^String (get m "result"))
+      (.build)))
 
 (extend-protocol JSONFreeze
   ContainsString

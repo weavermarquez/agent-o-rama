@@ -407,8 +407,8 @@
  ToolExecution
  [in]
  (-> (ToolExecution/builder)
-     (.request (nippy/thaw-from-in! in))
-     (.result (nippy/thaw-from-in! in))
+     (.request ^ToolExecutionRequest (nippy/thaw-from-in! in))
+     (.result ^String (nippy/thaw-from-in! in))
      .build))
 
 (ser/extend-8-byte-freeze
