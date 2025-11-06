@@ -8,6 +8,7 @@
    [com.rpl.agent-o-rama.impl.pobjects :as po]
    [com.rpl.agent-o-rama.impl.types :as aor-types]
    [com.rpl.agent-o-rama.langchain4j :as lc4j]
+   [com.rpl.agent-o-rama.langchain4j.json :as lj]
    [com.rpl.rama.ops :as ops]
    [expound.alpha :as expound]
    [jsonista.core :as j])
@@ -22,9 +23,7 @@
     SystemMessage
     TextContent
     ToolExecutionResultMessage
-    UserMessage]
-   [dev.langchain4j.model.chat.request.json
-    JsonRawSchema]))
+    UserMessage]))
 
 (spec/def ::description string?)
 (spec/def ::default string?)
@@ -89,18 +88,13 @@
         contents)))))
 
 (def DEFAULT-LLM-OUTPUT-SCHEMA
-  "{
-  \"type\": \"object\",
-  \"properties\": {
-    \"score\": {
-      \"type\": \"integer\",
-      \"minimum\": 0,
-      \"maximum\": 10
-    }
-  },
-  \"required\": [\"score\"],
-  \"additionalProperties\": false
-}")
+  (j/write-value-as-string
+   {:type                 "object"
+    :properties           {"score"
+                           {:type        "integer"
+                            :description "Numeric score from 0-10"}},
+    :required             ["score"]
+    :additionalProperties false}))
 
 (def DEFAULT-LLM-PROMPT
   "You are an impartial evaluator. Your task is to judge the quality of a model's output.
@@ -135,7 +129,7 @@ Be strict: minor wording differences are acceptable, but factual errors, omissio
                    :response-format
                    (lc4j/json-response-format
                     "Evaluation"
-                    (JsonRawSchema/from output-schema))}))
+                    (lj/from-json-string output-schema))}))
                 .aiMessage
                 .text
                 j/read-value)))))
