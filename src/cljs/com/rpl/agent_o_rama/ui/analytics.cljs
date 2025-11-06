@@ -5,6 +5,7 @@
    [com.rpl.agent-o-rama.ui.common :as common]
    [com.rpl.agent-o-rama.ui.queries :as queries]
    [com.rpl.agent-o-rama.ui.chart :as chart]
+   [reitit.frontend.easy :as rfe]
    [clojure.string :as str]
    [clojure.set :as set]
    ["use-debounce" :refer [useDebounce]]
@@ -54,6 +55,27 @@
                                          #js {:month "short"
                                               :day "numeric"
                                               :year "numeric"}))}])
+
+;; Query parameter helpers for analytics page
+(defn- build-query-params [granularity time-offset metadata-key]
+  "Build query params map from analytics state.
+   Omits default values to keep URLs clean. Reitit coercion handles encoding."
+  (cond-> {}
+    (not= granularity :minute)
+    (assoc :granularity granularity)
+
+    (not= time-offset 0)
+    (assoc :timeOffset time-offset)
+
+    (some? metadata-key)
+    (assoc :metadataKey metadata-key)))
+
+(defn- update-analytics-url [module-id agent-name granularity time-offset metadata-key]
+  "Update the URL with current analytics parameters using replace-state.
+   Reitit coercion automatically encodes keyword/int values to strings."
+  (rfe/replace-state :agent/analytics
+                     {:module-id module-id :agent-name agent-name}
+                     (build-query-params granularity time-offset metadata-key)))
 
 ;; Chart configurations for all static analytics charts
 (def chart-configs
@@ -476,9 +498,7 @@
                                  {:key (:id g)
                                   :label (:label g)
                                   :selected? (= (:id g) granularity)
-                                  :on-select #(do
-                                                (set-granularity (:id g))
-                                                (set-time-offset 0))})
+                                  :on-select #(set-granularity (:id g) 0 metadata-key)})
                                granularities)]
 
     ($ :div.bg-white.p-4.rounded-lg.shadow-sm.border.border-gray-200.mb-6
@@ -658,12 +678,47 @@
 
 (defui analytics-page []
   (let [{:keys [module-id agent-name]} (state/use-sub [:route :path-params])
+        ;; Get coerced parameters from Reitit - these are already typed correctly
+        coerced-params (state/use-sub [:route :parameters :query])
         decoded-agent-name (common/url-decode agent-name)
 
-        ;; Global control state
-        [granularity set-granularity] (uix/use-state :minute)
-        [time-offset set-time-offset] (uix/use-state 0) ;; 0 = live, negative = back in time
-        [metadata-key set-metadata-key] (uix/use-state nil)
+        ;; Use coerced values with defaults - Reitit handles type conversion for us
+        granularity (or (:granularity coerced-params) :minute)
+        time-offset (or (:timeOffset coerced-params) 0)
+        metadata-key (:metadataKey coerced-params)
+
+        ;; Setters that update URL - accept optional overrides for when multiple values change at once
+        set-granularity (uix/use-callback
+                         (fn
+                           ([new-granularity] (set-granularity new-granularity nil nil))
+                           ([new-granularity override-time-offset override-metadata-key]
+                            (let [final-granularity (if (fn? new-granularity)
+                                                      (new-granularity granularity)
+                                                      new-granularity)
+                                  final-time-offset (if (some? override-time-offset)
+                                                      override-time-offset
+                                                      time-offset)
+                                  final-metadata-key (if (some? override-metadata-key)
+                                                       override-metadata-key
+                                                       metadata-key)]
+                              (update-analytics-url module-id agent-name final-granularity final-time-offset final-metadata-key))))
+                         [module-id agent-name granularity time-offset metadata-key])
+
+        set-time-offset (uix/use-callback
+                         (fn [new-offset]
+                           (let [final-value (if (fn? new-offset)
+                                               (new-offset time-offset)
+                                               new-offset)]
+                             (update-analytics-url module-id agent-name granularity final-value metadata-key)))
+                         [module-id agent-name granularity time-offset metadata-key])
+
+        set-metadata-key (uix/use-callback
+                          (fn [new-key]
+                            (let [final-value (if (fn? new-key)
+                                                (new-key metadata-key)
+                                                new-key)]
+                              (update-analytics-url module-id agent-name granularity time-offset final-value)))
+                          [module-id agent-name granularity time-offset metadata-key])
 
         ;; Get granularity config and calculate time window
         granularity-config (first (filter #(= (:id %) granularity) granularities))
