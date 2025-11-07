@@ -88,13 +88,17 @@
         contents)))))
 
 (def DEFAULT-LLM-OUTPUT-SCHEMA
-  (j/write-value-as-string
-   {:type                 "object"
-    :properties           {"score"
-                           {:type        "integer"
-                            :description "Numeric score from 0-10"}},
-    :required             ["score"]
-    :additionalProperties false}))
+  "{
+  \"type\": \"object\",
+  \"properties\": {
+    \"score\": {
+      \"type\": \"integer\",
+      \"description\": \"Numeric score from 0-10\"
+    }
+  },
+  \"required\": [\"score\"],
+  \"additionalProperties\": false
+}")
 
 (def DEFAULT-LLM-PROMPT
   "You are an impartial evaluator. Your task is to judge the quality of a model's output.
@@ -218,7 +222,7 @@ Be strict: minor wording differences are acceptable, but factual errors, omissio
      :input-path? false
      ;; output-path? and reference-output-path? default to true
     }}})
-    
+
 (defn invalid-json-path
   [json-path]
   (if (empty? json-path)
