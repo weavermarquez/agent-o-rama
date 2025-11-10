@@ -142,7 +142,7 @@ The Maven target for Agent-o-rama is:
 <dependency>
   <groupId>com.rpl</groupId>
   <artifactId>agent-o-rama</artifactId>
-  <version>0.5.0</version>
+  <version>0.6.0</version>
 </dependency>
 ```
 
