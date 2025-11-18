@@ -153,6 +153,7 @@ The Maven target for Agent-o-rama is:
 * [Javadoc](https://redplanetlabs.com/aor/javadoc/index.html)
 * [Clojuredoc](https://redplanetlabs.com/aor/clojuredoc/index.html)
 * [Mailing list](https://groups.google.com/u/1/g/rama-user)
+* [Discord server](https://discord.gg/RX6UgQNR)
 * #rama channel on [Clojurians](https://clojurians.slack.com/)
 
 
