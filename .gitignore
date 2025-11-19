@@ -1,3 +1,5 @@
+.env
+
 /pom.xml
 pom.xml.asc
 *.jar
