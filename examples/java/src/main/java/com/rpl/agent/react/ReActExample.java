@@ -12,17 +12,17 @@ import java.io.*;
  * This example demonstrates how to create and run a ReAct (Reasoning and Acting) agent that can
  * search the web and answer questions.
  *
- * The agent uses OpenAI GPT-4o-mini for language processing and Tavily for web search
+ * The agent uses OpenAI GPT-4o-mini for language processing and Exa (via MCP) for web search
  * capabilities
  *
  * Required environment variables:
  *   - OPENAI_API_KEY: Your OpenAI API key
- *   - TAVILY_API_KEY: Your * Tavily search API key
+ *   - EXA_API_KEY: Your Exa search API key
  */
 public class ReActExample {
   private static void validateEnvironmentVariables() {
     String openaiKey = System.getenv("OPENAI_API_KEY");
-    String tavilyKey = System.getenv("TAVILY_API_KEY");
+    String exaKey = System.getenv("EXA_API_KEY");
 
     if (openaiKey == null || openaiKey.trim().isEmpty()) {
       System.err.println("Error: OPENAI_API_KEY environment variable is not set.");
@@ -30,9 +30,9 @@ public class ReActExample {
       System.exit(1);
     }
 
-    if (tavilyKey == null || tavilyKey.trim().isEmpty()) {
-      System.err.println("Error: TAVILY_API_KEY environment variable is not set.");
-      System.err.println("Please set your Tavily API key: export TAVILY_API_KEY=your_key_here");
+    if (exaKey == null || exaKey.trim().isEmpty()) {
+      System.err.println("Error: EXA_API_KEY environment variable is not set.");
+      System.err.println("Please set your Exa API key: export EXA_API_KEY=your_key_here");
       System.exit(1);
     }
   }

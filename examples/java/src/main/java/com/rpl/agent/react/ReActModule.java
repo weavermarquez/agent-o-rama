@@ -2,7 +2,6 @@ package com.rpl.agent.react;
 
 import com.rpl.agentorama.*;
 import dev.langchain4j.model.openai.OpenAiChatModel;
-import dev.langchain4j.web.search.tavily.TavilyWebSearchEngine;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.*;
 import dev.langchain4j.model.chat.ChatModel;
@@ -11,18 +10,18 @@ import dev.langchain4j.model.chat.response.ChatResponse;
 import java.util.*;
 
 /**
- * ReAct (Reasoning and Acting) Agent Module using agent-o-rama framework.
+ * ReAct (Reasoning and Acting) Agent Module using agent-o-rama framework with Exa search.
  *
  * <p>This module implements a conversational agent that can reason about user queries and take
- * actions using web search tools. It demonstrates the ReAct pattern where the agent alternates
- * between reasoning about what to do and taking actions.
+ * actions using Exa's search tools via MCP (Model Context Protocol). It demonstrates the ReAct
+ * pattern where the agent alternates between reasoning about what to do and taking actions.
  */
 public class ReActModule extends AgentModule {
 
   @Override
   protected void defineAgents(AgentTopology topology) {
     topology.declareAgentObject("openai-api-key", System.getenv("OPENAI_API_KEY"));
-    topology.declareAgentObject("tavily-api-key", System.getenv("TAVILY_API_KEY"));
+    topology.declareAgentObject("exa-api-key", System.getenv("EXA_API_KEY"));
 
     topology.declareAgentObjectBuilder(
         "openai",
@@ -31,17 +30,9 @@ public class ReActModule extends AgentModule {
           return OpenAiChatModel.builder().apiKey(apiKey).modelName("gpt-4o-mini").build();
         });
 
-    topology.declareAgentObjectBuilder(
-        "tavily",
-        (AgentObjectSetup setup) -> {
-          String apiKey = (String) setup.getAgentObject("tavily-api-key");
-          return TavilyWebSearchEngine.builder()
-              .apiKey(apiKey)
-              .excludeDomains(Arrays.asList("en.wikipedia.org"))
-              .build();
-        });
-
-    topology.newToolsAgent("tools", ToolsFactory.createTools());
+    // Create tools using Exa MCP
+    String exaApiKey = System.getenv("EXA_API_KEY");
+    topology.newToolsAgent("tools", ExaMcpToolsFactory.createTools(exaApiKey));
 
     topology.newAgent("ReActAgent")
             .node("chat", "chat", (AgentNode agentNode, List<Object> inputMessages) -> {
@@ -57,10 +48,11 @@ public class ReActModule extends AgentModule {
               ChatModel openai = agentNode.getAgentObject("openai");
               AgentClient tools = agentNode.getAgentClient("tools");
 
+              String exaKey = (String) agentNode.getAgentObject("exa-api-key");
               ChatRequest request =
                   ChatRequest.builder()
                       .messages(messages)
-                      .toolSpecifications(ToolsFactory.createToolSpecifications())
+                      .toolSpecifications(ExaMcpToolsFactory.createToolSpecifications(exaKey))
                       .build();
               ChatResponse response = openai.chat(request);
               AiMessage aiMessage = response.aiMessage();
