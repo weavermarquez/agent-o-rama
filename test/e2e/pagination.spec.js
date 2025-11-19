@@ -81,16 +81,23 @@ test.describe('Pagination Tests', () => {
     let loadMoreClicks = 0;
     while (await loadMoreButton.isVisible()) {
       loadMoreClicks++;
-      console.log(`Clicking Load More (click #${loadMoreClicks})...`);
+      const countBeforeClick = await page.locator('table tbody tr').count();
+      console.log(`Clicking Load More (click #${loadMoreClicks})... (current count: ${countBeforeClick})`);
       await loadMoreButton.click();
-      
-      // Wait for loading state to complete
-      await expect(page.locator('tfoot').filter({ hasText: 'Loading...' })).toBeVisible();
+
+      // Wait for loading state to complete AND for rows to be added
+      // First wait for loading indicator to disappear (if it appears)
       await expect(page.locator('tfoot').filter({ hasText: 'Loading...' })).not.toBeVisible({ timeout: 10000 });
-      
+
+      // Then wait for row count to actually increase (DOM update may lag behind state)
+      await expect(async () => {
+        const currentCount = await page.locator('table tbody tr').count();
+        expect(currentCount).toBeGreaterThan(countBeforeClick);
+      }).toPass({ timeout: 5000 });
+
       const currentCount = await page.locator('table tbody tr').count();
       console.log(`After click #${loadMoreClicks}: ${currentCount} items visible`);
-      
+
       // Safety check to prevent infinite loop
       if (loadMoreClicks > 5) {
         throw new Error('Too many Load More clicks - possible infinite loop');
@@ -134,15 +141,16 @@ test.describe('Pagination Tests', () => {
     
     let itemCount = 0;
     const loadMoreButton = page.locator('tfoot tr').filter({ hasText: 'Load More' });
-    
-    // Keep creating until Load More appears (page size is 25, so we need enough to exceed that)
-    while (!(await loadMoreButton.isVisible()) && itemCount < 50) {
+
+    // Ensure we create at least 1 dataset for verification, even if Load More is already visible
+    const minDatasets = 1;
+    while ((!(await loadMoreButton.isVisible()) || itemCount < minDatasets) && itemCount < 50) {
       itemCount++;
       const name = `${namePrefix}-${String(itemCount).padStart(3, '0')}`;
       datasetNames.push(name);
-      
+
       await createDataset(page, name);
-      
+
       if (itemCount % 5 === 0) {
         console.log(`Created ${itemCount} datasets, checking for Load More button...`);
         await page.waitForTimeout(300);
@@ -158,16 +166,23 @@ test.describe('Pagination Tests', () => {
     let loadMoreClicks = 0;
     while (await loadMoreButton.isVisible()) {
       loadMoreClicks++;
-      console.log(`Clicking Load More (click #${loadMoreClicks})...`);
+      const countBeforeClick = await page.locator('table tbody tr').count();
+      console.log(`Clicking Load More (click #${loadMoreClicks})... (current count: ${countBeforeClick})`);
       await loadMoreButton.click();
-      
-      // Wait for loading state to complete
-      await expect(page.locator('tfoot').filter({ hasText: 'Loading...' })).toBeVisible();
+
+      // Wait for loading state to complete AND for rows to be added
+      // First wait for loading indicator to disappear (if it appears)
       await expect(page.locator('tfoot').filter({ hasText: 'Loading...' })).not.toBeVisible({ timeout: 10000 });
-      
+
+      // Then wait for row count to actually increase (DOM update may lag behind state)
+      await expect(async () => {
+        const currentCount = await page.locator('table tbody tr').count();
+        expect(currentCount).toBeGreaterThan(countBeforeClick);
+      }).toPass({ timeout: 5000 });
+
       const currentCount = await page.locator('table tbody tr').count();
       console.log(`After click #${loadMoreClicks}: ${currentCount} items visible`);
-      
+
       // Safety check to prevent infinite loop
       if (loadMoreClicks > 5) {
         throw new Error('Too many Load More clicks - possible infinite loop');
@@ -243,16 +258,23 @@ test.describe('Pagination Tests', () => {
     let loadMoreClicks = 0;
     while (await loadMoreButton.isVisible()) {
       loadMoreClicks++;
-      console.log(`Clicking Load More (click #${loadMoreClicks})...`);
+      const countBeforeClick = await page.locator('table tbody tr').count();
+      console.log(`Clicking Load More (click #${loadMoreClicks})... (current count: ${countBeforeClick})`);
       await loadMoreButton.click();
-      
-      // Wait for loading state to complete
-      await expect(page.locator('tfoot').filter({ hasText: 'Loading...' })).toBeVisible();
+
+      // Wait for loading state to complete AND for rows to be added
+      // First wait for loading indicator to disappear (if it appears)
       await expect(page.locator('tfoot').filter({ hasText: 'Loading...' })).not.toBeVisible({ timeout: 10000 });
-      
+
+      // Then wait for row count to actually increase (DOM update may lag behind state)
+      await expect(async () => {
+        const currentCount = await page.locator('table tbody tr').count();
+        expect(currentCount).toBeGreaterThan(countBeforeClick);
+      }).toPass({ timeout: 5000 });
+
       const currentCount = await page.locator('table tbody tr').count();
       console.log(`After click #${loadMoreClicks}: ${currentCount} items visible`);
-      
+
       // Safety check to prevent infinite loop
       if (loadMoreClicks > 5) {
         throw new Error('Too many Load More clicks - possible infinite loop');

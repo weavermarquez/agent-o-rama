@@ -30,12 +30,13 @@
   At least one element must be a LangChain4j chat message.
   All elements must be either strings or LangChain4j chat messages."
   [data]
+  (boolean
   (and (sequential? data)
        (seq data)
        ;; At least one element must be a chat message
        (some chat-message? data)
        ;; All elements must be either strings or chat messages
-       (every? #(or (string? %) (chat-message? %)) data)))
+       (every? #(or (string? %) (chat-message? %)) data))))
 
 (defn extract-message-role-and-text
   "Extract role and text from a chat message or string.

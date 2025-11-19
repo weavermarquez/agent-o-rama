@@ -167,10 +167,21 @@ test('should create, test, and clean up all three evaluator types', async ({ pag
 
   const summaryModal = page.locator('[role="dialog"]');
   await expect(summaryModal).toBeVisible();
-  await summaryModal.getByRole('button', { name: /Choose an evaluator/ }).click();
+  // Wait for evaluators to load - the modal shows "Loading evaluators..." initially
+  // We need to wait for that loading state to complete
+  const loadingText = summaryModal.getByText('Loading evaluators...');
+  const hasLoading = await loadingText.isVisible().catch(() => false);
+  if (hasLoading) {
+    console.log('Waiting for evaluators to load...');
+    await expect(loadingText).not.toBeVisible({ timeout: 30000 });
+  }
+  const chooseButton = summaryModal.getByRole('button', { name: /Choose an evaluator/ });
+  await expect(chooseButton).toBeVisible({ timeout: 10000 });
+  await chooseButton.click();
 
     // Assert dropdown is filtered correctly (only summary should be visible)
-    await expect(summaryModal.getByText(summaryEvalName)).toBeVisible();
+    // Use longer timeout as dropdown loads evaluators asynchronously
+    await expect(summaryModal.getByText(summaryEvalName)).toBeVisible({ timeout: 10000 });
     await expect(summaryModal.getByText(regularEvalName)).not.toBeVisible();
     // await expect(summaryModal.getByText(comparativeEvalName)).not.toBeVisible(); // commented out - jcompare1 not loaded
 
@@ -254,9 +265,15 @@ test('should test evaluators from the evaluators page with conditional field ren
 
   // 2. Test regular evaluator from evaluators page
   console.log('--- Testing Regular Evaluator from Evaluators Page ---');
-  
+
+  // Search for the regular evaluator to ensure it's visible
+  const searchInput = page.getByPlaceholder('Search evaluators...');
+  await searchInput.fill(testRegularEvalName);
+  await page.waitForTimeout(500); // Wait for debounced search
+
   // Click on the evaluator row to open details modal
   const regularEvalRow = page.locator('table tbody tr').filter({ hasText: testRegularEvalName });
+  await expect(regularEvalRow).toBeVisible({ timeout: 10000 });
   await regularEvalRow.click();
   
   // Wait for details modal to appear
@@ -299,9 +316,15 @@ test('should test evaluators from the evaluators page with conditional field ren
 
   // 3. Test summary evaluator warning message
   console.log('--- Testing Summary Evaluator Warning Message ---');
-  
+
+  // Search for the summary evaluator to ensure it's visible
+  await searchInput.clear();
+  await searchInput.fill(testSummaryEvalName);
+  await page.waitForTimeout(500); // Wait for debounced search
+
   // Click on the summary evaluator row
   const summaryEvalRow = page.locator('table tbody tr').filter({ hasText: testSummaryEvalName });
+  await expect(summaryEvalRow).toBeVisible({ timeout: 10000 });
   await summaryEvalRow.click();
   
   // Wait for details modal
