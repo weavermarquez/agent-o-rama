@@ -8,7 +8,7 @@ set -e
 # Default port
 PORT=1974
 
-# Default JVM options (empty)
+# Default JVM options
 JVM_OPTS="-Xmx1g"
 
 # Parse command line arguments
