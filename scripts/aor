@@ -9,7 +9,7 @@ set -e
 PORT=1974
 
 # Default JVM options (empty)
-JVM_OPTS=""
+JVM_OPTS="-Xmx1g"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
