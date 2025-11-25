@@ -49,75 +49,16 @@ Rama can be downloaded [here](https://redplanetlabs.com/download), and instructi
 
 Development of Agent-o-rama applications is done with "in-process cluster" (IPC), which simulates Rama clusters in a single process. IPC is great for unit testing or experimentation at a REPL. [See below](#defining-agents) for examples in both Java and Clojure of agents utilizing an LLM run with IPC.
 
-The following are the key similarities and differences between Agent-o-rama and LangGraph/LangSmith:
 
-### ✅ Key Similarities with LangGraph/LangSmith
+## Detaild comparisons against other agent tools
 
-#### 🧱 Agent Structure
+- [Agent-o-rama vs. LangGraph / LangSmith](https://github.com/redplanetlabs/agent-o-rama/wiki/LangGraph-and-LangSmith-comparison)
+- [Agent-o-rama vs. LangChain4j](https://github.com/redplanetlabs/agent-o-rama/wiki/LangChain4j-comparison)
+- [Agent-o-rama vs. Spring AI](https://github.com/redplanetlabs/agent-o-rama/wiki/Spring-AI-comparison)
+- [Agent-o-rama vs. Koog](https://github.com/redplanetlabs/agent-o-rama/wiki/Koog-comparison)
+- [Agent-o-rama vs. Embabel](https://github.com/redplanetlabs/agent-o-rama/wiki/Embabel-comparison)
+- [Agent-o-rama vs. LangGraph4j](https://github.com/redplanetlabs/agent-o-rama/wiki/LangGraph4j-comparison)
 
-- **Graph-based agent definitions:**  
-  Agents are defined as explicit graphs of regular Java or Clojure functions, with named nodes and edges, similar in spirit to LangGraph's approach to structured agent workflows.
-
-- **Forking and versioning:**  
-  Any agent or node can be forked and modified independently, useful for testing prompt or logic variations without disrupting production agents.
-
-#### 📋 Execution & Tracing
-
-- **Structured execution traces:**  
-  Every agent invocation is captured as a trace with detailed stats on every aspect of execution including latency, token usage, model calls, tool invocations, and database calls.
-
-- **Streaming at the node level:**  
-  Nodes can emit intermediate chunks before completing, allowing fine-grained, real-time streaming. LLM calls are automatically streamed, and the AOR API includes methods to explicitly stream chunks from a node. A first-class client API can register a callback to receive all chunks from a node.
-
-#### 🧪 Experimentation & Evaluation
-
-- **Datasets and snapshots:**  
-  Inputs and outputs can be captured into versioned datasets, making it easy to replay examples and benchmark changes.
-
-- **Experiments (agent-wide or per-node):**  
-  Test entire agents or individual nodes (e.g., a new prompt or model) against datasets. Results are evaluated using any number of user-defined evaluators, whether custom functions or using LLMs to score.
-
-- **Online evaluation and actions:**  
-  Actions are user-defined hooks that run on a sampled subset of live agent or node executions. They can be used for real-time evaluation, dataset capture, triggering webhooks, or any custom logic. Actions can filter on conditions like latency, token usage, errors, or input/output content.
-
-#### 🤝 Interaction & Monitoring
-
-- **Human input integration:**  
-  Agents can pause mid-execution to request structured human input, then resume once the input is received.
-
-- **Telemetry:**  
-  Detailed, real-time time-series metrics across all agents, including invocation rates, latencies, model and token usage, database access, custom evaluator metrics, and more.
-
----
-
-### 🔀 Key Differences with LangGraph/LangSmith
-
-#### 💻 Language & Runtime
-
-- **JVM, not Python:**  
-  AOR is a platform for developing agents on the JVM in Java or Clojure.
-
-- **Distributed, parallel execution model:**  
-  AOR agents are distributed, parallel execution graphs with no central state or coordinator. Each node runs independently, and emit targets are processed concurrently across threads and machines.
-
-- **Agent code executes on virtual threads:**
-  All agent code executes on [virtual threads](https://docs.oracle.com/en/java/javase/21/core/virtual-threads.html), which lets all code be written in a blocking style without consuming scarce platform threads. Coding long-running or I/O-intensive tasks is straightforward since the complexity of callbacks or async frameworks is avoided.
-
-- **Feature parity:**  
-  Agent-o-rama doesn't have every feature of LangSmith yet, such as annotation queues and "few-shot examples". However, we're working on those.
-
-#### 🧠 State & Control
-
-- **Built-in, high-performance storage:**  
-  Built-in, high-performance storage (document stores, KV stores, or any other data model) eliminates the need for external databases in most cases. This greatly simplifies deployment, optimization, and operations.
-
-- **First-class human input:**  
-  Human input is a first-class API rather than based on using exceptions for break points.
-
-#### ☁️ Deployment
-
-- **Unified infrastructure:**  
-  Everything is deployed onto your own infrastructure via [Rama](https://redplanetlabs.com/), and there are no hosted services. The full system runs locally, in the cloud, or across clusters with no dependency on external SaaS platforms.
 
 ## Downloads
 
