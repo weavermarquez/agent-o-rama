@@ -39,7 +39,7 @@ Agents are defined as simple graphs of Java or Clojure functions that execute in
 
 ## Overview
 
-LLMs are powerful but inherently unpredictable, so building applications with LLMs that are helpful and performant with minimal hallucination requires being extensive testing and monitoring. Agent-o-rama addresses this by making evaluation and observability a first-class part of the development process, not an afterthought.
+LLMs are powerful but inherently unpredictable, so building applications with LLMs that are helpful and performant with minimal hallucination requires extensive testing and monitoring. Agent-o-rama addresses this by making evaluation and observability a first-class part of the development process, not an afterthought.
 
 Agent-o-rama is deployed onto your own infrastructure on a [Rama cluster](https://redplanetlabs.com/). Rama is free to use for clusters up to two nodes and can scale to thousands with a commercial license. Every part of Agent-o-rama is built-in and requires no other dependency besides Rama, including high-performance, durable, and replicated storage of any data model that can be used as part of agents. Agent-o-rama also integrates seamlessly with any other tool, such as databases, vector stores, external APIs, or anything else. Unlike hosted observability tools, all data and traces stay within your infrastructure.
 
@@ -232,11 +232,11 @@ From the trace UI you can also fork any previous agent invoke, changing the argu
 
 ### Incorporating human input into agent execution
 
-Agent-o-rama has a first-class API for dynamically requesting human input in the middle of agent execution. Pending human input is viewable in traces and can be provided there or via the API.
+Agent-o-rama has a first-class API for dynamically requesting [human input](https://github.com/redplanetlabs/agent-o-rama/wiki/Human%E2%80%90in%E2%80%90the%E2%80%90loop) in the middle of agent execution. Pending human input is viewable in traces and can be provided there or via the API.
 
 ![Human input](readme/human-input.png)
 
-Human input is requested in a node function with the blocking call `agentNode.getHumanInput(prompt)` in Java and `(aor/get-human-input agent-node prompt)` in Clojure. Since nodes run on virtual threads, this is efficient. This returns the string the human provided that can be utilized in the rest of the agent execution.
+Human input is requested in a node function with the blocking call `agentNode.getHumanInput(prompt)` in Java and `(aor/get-human-input agent-node prompt)` in Clojure. Since nodes run on [virtual threads](https://docs.oracle.com/en/java/javase/21/core/virtual-threads.html), this is efficient. This returns the string the human provided that can be utilized in the rest of the agent execution.
 
 
 ### Streaming agent nodes to clients
