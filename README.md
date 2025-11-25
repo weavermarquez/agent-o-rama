@@ -50,7 +50,7 @@ Rama can be downloaded [here](https://redplanetlabs.com/download), and instructi
 Development of Agent-o-rama applications is done with "in-process cluster" (IPC), which simulates Rama clusters in a single process. IPC is great for unit testing or experimentation at a REPL. [See below](#defining-agents) for examples in both Java and Clojure of agents utilizing an LLM run with IPC.
 
 
-## Detaild comparisons against other agent tools
+## Detailed comparisons against other agent tools
 
 - [Agent-o-rama vs. LangGraph / LangSmith](https://github.com/redplanetlabs/agent-o-rama/wiki/LangGraph-and-LangSmith-comparison)
 - [Agent-o-rama vs. LangChain4j](https://github.com/redplanetlabs/agent-o-rama/wiki/LangChain4j-comparison)
