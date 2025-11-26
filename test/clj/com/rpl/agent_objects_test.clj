@@ -21,6 +21,10 @@
   (:import
    [com.rpl.rama.helpers
     TopologyUtils]
+   [dev.langchain4j.data.document
+    Document]
+   [dev.langchain4j.data.segment
+    TextSegment]
    [dev.langchain4j.data.embedding
     Embedding]
    [dev.langchain4j.data.message
@@ -307,9 +311,11 @@
   (^void removeAll [this ^java.util.Collection ids])
   (search [this request]
     (EmbeddingSearchResult.
-     [(EmbeddingMatch. 0.5 "11" (tc/embedding 0.1 0.2) "foo")
-      (EmbeddingMatch. 0.75 "12" (tc/embedding 1.5 0.3) "bar")]
-    )))
+     [(EmbeddingMatch. 0.5 "11" (tc/embedding 0.1 0.2) (tc/text-segment "foo" {"source" "doc1" "page" 1}))
+      (EmbeddingMatch. 0.75 "12" (tc/embedding 1.5 0.3) (tc/text-segment "bar" {"source" "doc2" "page" 3}))
+      (EmbeddingMatch. 0.6 "13" (tc/embedding 0.2 0.4) nil)
+      (EmbeddingMatch. 0.8 "14" (tc/embedding 0.3 0.5) (tc/document "doc text" {"author" "Smith" "year" 2023}))
+      (EmbeddingMatch. 0.9 "15" (tc/embedding 0.4 0.6) (TextSegment/from "baz"))])))
 
 (deftest object-wrapping-test
   (with-open [ipc (rtest/create-ipc)
@@ -596,6 +602,7 @@
                              [[agent-task-id root]]
                              10000))
 
+;; Verify all nested operations exist with correct types
      (is
       (trace-matches?
        (walk/postwalk
@@ -625,61 +632,51 @@
                           :info
                           {"op"         "add"
                            "id"         "999"
-                           "objectName" "emb"
-                          }}
+                           "objectName" "emb"}}
                          {:type :db-write
                           :info
                           {"op"         "add"
                            "id"         "1001"
-                           "objectName" "emb"
-                          }}
+                           "objectName" "emb"}}
                          {:type :db-write
                           :info
                           {"op"         "add"
                            "id"         "abcd"
-                           "objectName" "emb"
-                          }}
+                           "objectName" "emb"}}
                          {:type :db-write
                           :info
                           {"op"         "addAll"
                            "ids"        ["0" "1"]
-                           "objectName" "emb"
-                          }}
+                           "objectName" "emb"}}
                          {:type :db-write
                           :info
                           {"op"         "addAll"
                            "ids"        ["0" "1"]
-                           "objectName" "emb"
-                          }}
+                           "objectName" "emb"}}
                          {:type :db-write
                           :info
                           {"op"         "addAll"
                            "ids"        ["7" "8"]
-                           "objectName" "emb"
-                          }}
+                           "objectName" "emb"}}
                          {:type :db-write
                           :info
                           {"op"         "remove"
                            "id"         "id1"
-                           "objectName" "emb"
-                          }}
+                           "objectName" "emb"}}
                          {:type :db-write
                           :info
                           {"op"         "removeAll"
-                           "objectName" "emb"
-                          }}
+                           "objectName" "emb"}}
                          {:type :db-write
                           :info
                           {"op"         "removeAll"
                            "filter"     "IsEqualTo(key=a, comparisonValue=1)"
-                           "objectName" "emb"
-                          }}
+                           "objectName" "emb"}}
                          {:type :db-write
                           :info
                           {"op"         "removeAll"
                            "ids"        ["id1" "id2"]
-                           "objectName" "emb"
-                          }}
+                           "objectName" "emb"}}
                          {:type :db-read
                           :info
                           {"op"         "search"
@@ -689,12 +686,21 @@
                             "maxResults" ["i" "5"]
                             "minScore"   ["d" "0.75"]}
                            "matches"
-                           [{"id"    "11"
-                             "score" ["d" "0.5"]}
-                            {"id"    "12"
-                             "score" ["d" "0.75"]}
-                           ]
-                          }}]
+                           [{"id"       "11"
+                             "score"    ["d" "0.5"]
+                             "metadata" {"source" "doc1"
+                                         "page"   ["i" "1"]}}
+                            {"id"       "12"
+                             "score"    ["d" "0.75"]
+                             "metadata" {"source" "doc2"
+                                         "page"   ["i" "3"]}}
+                            {"id"    "13"
+                             "score" ["d" "0.6"]}
+                            {"id"    "14"
+                             "score" ["d" "0.8"]}
+                            {"id"       "15"
+                             "score"    ["d" "0.9"]
+                             "metadata" {}}]}}]
          :input         ["emb" ""]}}
        (m/guard
         (and (= ?agent-id agent-id)

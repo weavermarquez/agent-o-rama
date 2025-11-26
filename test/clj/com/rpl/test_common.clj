@@ -15,6 +15,11 @@
   (:import
    [dev.langchain4j.data.embedding
     Embedding]
+   [dev.langchain4j.data.document
+    Document
+    Metadata]
+   [dev.langchain4j.data.segment
+    TextSegment]
    [com.rpl.agentorama
     AgentInvoke]
    [com.rpl.rama.helpers
@@ -99,3 +104,23 @@
     (dotimes [i (count nums)]
       (aset-float arr i (float (nth nums i))))
     (Embedding. arr)))
+
+(defn text-segment
+  ^TextSegment [text metadata-map]
+  ;; Convert numeric values to Integer for consistent type handling.
+  ;; Clojure numeric literals are Long by default, but converting to Integer
+  ;; enables reliable pattern matching in test assertions that check for
+  ;; Integer class specifically (see object-wrapping-test).
+  (let [java-metadata (into {}
+                            (map (fn [[k v]]
+                                   [k (if (number? v) (Integer. (int v)) v)])
+                                 metadata-map))]
+    (TextSegment/from text (Metadata/from java-metadata))))
+
+(defn document
+  ^Document [text metadata-map]
+  (let [java-metadata (into {}
+                            (map (fn [[k v]]
+                                   [k (if (number? v) (Integer. (int v)) v)])
+                                 metadata-map))]
+    (Document/from text (Metadata/from java-metadata))))
