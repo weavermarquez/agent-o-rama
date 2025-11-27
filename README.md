@@ -23,7 +23,7 @@ Agents are defined as simple graphs of Java or Clojure functions that execute in
 </p>
 
 - [Overview](#overview)
-- [Key similarities and differences with LangGraph/LangSmith](#-key-similarities-with-langgraphlangsmith)
+- [Detailed comparisons against other agent tools](#detailed-comparisons-against-other-agent-tools)
 - [Downloads](#downloads)
 - [Learning Agent-o-rama](#learning-agent-o-rama)
 - [Tour of Agent-o-rama](#tour-of-agent-o-rama)
